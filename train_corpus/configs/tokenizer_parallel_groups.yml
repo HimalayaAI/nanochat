@@ -1,0 +1,79 @@
+- name: ne_deva
+  weight: 0.40
+  equal_split: true
+  sources:
+    - himalaya-ai/nepali-corpus-compile
+    - himalaya-ai/nepali-pretrain-corpus
+    - ai4bharat/sangraha:verified:nep
+  shard_prefix: ne_deva
+  log: data/tokenizer_ne_deva.log
+
+- name: deva_mix
+  weight: 0.05
+  equal_split: true
+  sources:
+    - himalaya-ai/devanagari_pretrain
+  shard_prefix: deva_mix
+  log: data/tokenizer_deva_mix.log
+
+- name: hi_deva
+  weight: 0.18
+  equal_split: true
+  sources:
+    - ai4bharat/sangraha:verified:hin
+    - ai4bharat/IndicCorpV2:hin_Deva:train
+    - zicsx/OSCAR-2301-Hindi
+    - uavaidya/hindi-fineweb2-40b
+  shard_prefix: hi_deva
+  log: data/tokenizer_hi_deva.log
+
+- name: en
+  weight: 0.18
+  equal_split: true
+  sources:
+    - HuggingFaceFW/fineweb-edu
+    - mlfoundations/dclm-baseline-1.0
+  shard_prefix: en
+  log: data/tokenizer_en.log
+
+- name: code
+  weight: 0.07
+  equal_split: true
+  sources:
+    - OpenCoder-LLM/opc-fineweb-code-corpus
+    - bigcode/the-stack-dedup
+  shard_prefix: code
+  log: data/tokenizer_code.log
+
+- name: math
+  weight: 0.03
+  equal_split: true
+  sources:
+    - OpenCoder-LLM/opc-fineweb-math-corpus
+    - HuggingFaceTB/finemath:finemath-3plus:train
+  shard_prefix: math
+  log: data/tokenizer_math.log
+
+- name: roman_ne
+  weight: 0.04
+  equal_split: true
+  sources:
+    - himalaya-ai/nepali-roman-pretrain
+  shard_prefix: roman_ne
+  log: data/tokenizer_roman_ne.log
+
+- name: indic_latn
+  weight: 0.04
+  equal_split: true
+  sources:
+    - himalaya-ai/indic_latn_pretrain
+  shard_prefix: indic_latn
+  log: data/tokenizer_indic_latn.log
+
+- name: roman_hi
+  weight: 0.01
+  equal_split: true
+  sources:
+    - ai4bharat/sangraha:synthetic:hin_Latn
+  shard_prefix: roman_hi
+  log: data/tokenizer_roman_hi.log

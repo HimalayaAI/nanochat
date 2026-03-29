@@ -1,0 +1,22 @@
+token_estimator: tiktoken
+sample_rows: 200000
+stats_path: data/devanagari_token_estimates.json
+
+# Optional quality filters for estimation
+filters:
+  min_devanagari_ratio: 0.3
+
+sources:
+  - id: himalaya-ai/nepali-corpus-compile
+    split: train
+    field: text
+    stratify_by: source
+    include_other: true
+    shuffle_buffer: 100000
+
+  - id: himalaya-ai/nepali-pretrain-corpus
+    split: train
+    field: text
+    stratify_by: source
+    include_other: true
+    shuffle_buffer: 100000
