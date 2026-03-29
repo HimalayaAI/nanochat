@@ -36,8 +36,7 @@ project_root = str(Path(__file__).resolve().parents[1])
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from nepali_tokenizer.hf_utils import get_field_value
-from nepali_tokenizer.quality_filters import FilterSpec, normalize_text, passes_quality
+from train_corpus.merge_datasets.quality_filters import FilterSpec, normalize_text, passes_quality
 
 
 logging.basicConfig(
@@ -46,6 +45,39 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+
+def item_get(item: Any, key: str) -> Any:
+    if hasattr(item, "get"):
+        try:
+            return item.get(key)
+        except Exception:
+            pass
+    try:
+        return item[key]
+    except Exception:
+        return None
+
+
+def get_field_value(item: Any, field_spec: Any) -> Any:
+    if field_spec is None:
+        return None
+    if isinstance(field_spec, (list, tuple)):
+        for spec in field_spec:
+            val = get_field_value(item, spec)
+            if val is not None:
+                return val
+        return None
+    if isinstance(field_spec, str) and "." in field_spec:
+        current = item
+        for part in field_spec.split("."):
+            if current is None:
+                return None
+            current = item_get(current, part)
+        return current
+    if isinstance(field_spec, str):
+        return item_get(item, field_spec)
+    return None
 
 
 def load_config(path: str) -> Dict[str, Any]:

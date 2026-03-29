@@ -27,8 +27,8 @@ project_root = str(Path(__file__).resolve().parents[2])
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from scripts.merge_datasets.merge_corpus_to_hf import get_max_shard_index
-from scripts.merge_datasets.quality_filters import normalize_text
+from train_corpus.merge_datasets.merge_corpus_to_hf import get_max_shard_index
+from train_corpus.merge_datasets.quality_filters import normalize_text
 
 logging.basicConfig(
     level=logging.INFO,

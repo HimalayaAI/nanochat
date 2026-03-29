@@ -37,8 +37,8 @@ project_root = str(Path(__file__).resolve().parents[2])
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from scripts.merge_datasets.quality_filters import FilterSpec, normalize_text, passes_quality
-from scripts.merge_datasets.merge_corpus_to_hf import (
+from train_corpus.merge_datasets.quality_filters import FilterSpec, normalize_text, passes_quality
+from train_corpus.merge_datasets.merge_corpus_to_hf import (
     DedupeStore,
     get_max_shard_index,
     hash_text,

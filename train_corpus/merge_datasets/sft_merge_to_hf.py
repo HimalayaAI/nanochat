@@ -28,7 +28,7 @@ project_root = str(Path(__file__).resolve().parents[2])
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from scripts.merge_datasets.merge_corpus_to_hf import (
+from train_corpus.merge_datasets.merge_corpus_to_hf import (
     get_max_shard_index,
 )
 

@@ -22,12 +22,12 @@ project_root = str(Path(__file__).resolve().parents[2])
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from scripts.merge_datasets.merge_corpus_to_hf import (
+from train_corpus.merge_datasets.merge_corpus_to_hf import (
     build_legacy_filter_spec,
     parse_sources,
     get_field_value,
 )
-from scripts.merge_datasets.quality_filters import (
+from train_corpus.merge_datasets.quality_filters import (
     FilterSpec,
     compute_metrics,
     normalize_text,
