@@ -152,6 +152,8 @@ class SourcePlan:
     equal_strata: bool
     auto_discover: Optional[AutoDiscoverConfig]
     fix_null_features: bool
+    text_encoding: Optional[str]
+    text_encoding_errors: Optional[str]
 
 
 @dataclass
@@ -261,6 +263,8 @@ def build_sources(
             else None
         )
         fix_null_features = bool(src.get("fix_null_features", cfg.get("fix_null_features", True)))
+        text_encoding = src.get("text_encoding")
+        text_encoding_errors = src.get("text_encoding_errors")
 
         source_key = f"{source_id}:{config or 'default'}:{split}"
         plans.append(
@@ -284,6 +288,8 @@ def build_sources(
                 equal_strata=equal_strata,
                 auto_discover=auto_discover,
                 fix_null_features=fix_null_features,
+                text_encoding=text_encoding,
+                text_encoding_errors=text_encoding_errors,
             )
         )
     return plans
@@ -422,6 +428,10 @@ def iter_hf_rows(plan: SourcePlan) -> Iterator[Dict[str, Any]]:
     try:
         features = _get_sanitized_features(plan)
         load_kwargs = {"split": plan.split, "streaming": True}
+        if plan.text_encoding:
+            load_kwargs["encoding"] = plan.text_encoding
+        if plan.text_encoding_errors:
+            load_kwargs["encoding_errors"] = plan.text_encoding_errors
         if features is not None:
             load_kwargs["features"] = features
         if plan.config:
@@ -429,19 +439,18 @@ def iter_hf_rows(plan: SourcePlan) -> Iterator[Dict[str, Any]]:
         else:
             ds = load_dataset(plan.source_id, **load_kwargs)
     except TypeError as exc:
-        if features is not None:
-            logger.warning(
-                "Feature override failed for %s (%s). Retrying without features.",
-                plan.source_key,
-                exc,
-            )
-            load_kwargs.pop("features", None)
-            if plan.config:
-                ds = load_dataset(plan.source_id, name=plan.config, **load_kwargs)
-            else:
-                ds = load_dataset(plan.source_id, **load_kwargs)
+        logger.warning(
+            "load_dataset TypeError for %s (%s). Retrying with fewer kwargs.",
+            plan.source_key,
+            exc,
+        )
+        load_kwargs.pop("features", None)
+        load_kwargs.pop("encoding", None)
+        load_kwargs.pop("encoding_errors", None)
+        if plan.config:
+            ds = load_dataset(plan.source_id, name=plan.config, **load_kwargs)
         else:
-            raise
+            ds = load_dataset(plan.source_id, **load_kwargs)
     except Exception as exc:
         logger.warning("Failed to load %s: %s", plan.source_key, exc)
         raise
