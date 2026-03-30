@@ -147,6 +147,7 @@ class SourcePlan:
     explicit_target: bool
     filters: Optional[FilterSpec]
     shuffle_buffer: int
+    data_files: Optional[Any]
     stratify_by: List[str]
     strata: Dict[str, List[str]]
     equal_strata: bool
@@ -203,6 +204,7 @@ def build_sources(
         doc_id_field = src.get("doc_id_field")
         lang = src.get("lang", "unknown")
         shuffle_buffer = int(src.get("shuffle_buffer", 10000))
+        data_files = src.get("data_files")
         weight = float(src.get("weight", 0.0))
 
         if not source_id:
@@ -283,6 +285,7 @@ def build_sources(
                 explicit_target=explicit_target,
                 filters=filters,
                 shuffle_buffer=shuffle_buffer,
+                data_files=data_files,
                 stratify_by=stratify_by,
                 strata=strata,
                 equal_strata=equal_strata,
@@ -432,6 +435,8 @@ def iter_hf_rows(plan: SourcePlan) -> Iterator[Dict[str, Any]]:
             load_kwargs["encoding"] = plan.text_encoding
         if plan.text_encoding_errors:
             load_kwargs["encoding_errors"] = plan.text_encoding_errors
+        if plan.data_files:
+            load_kwargs["data_files"] = plan.data_files
         if features is not None:
             load_kwargs["features"] = features
         if plan.config:
@@ -447,6 +452,7 @@ def iter_hf_rows(plan: SourcePlan) -> Iterator[Dict[str, Any]]:
         load_kwargs.pop("features", None)
         load_kwargs.pop("encoding", None)
         load_kwargs.pop("encoding_errors", None)
+        load_kwargs.pop("data_files", None)
         if plan.config:
             ds = load_dataset(plan.source_id, name=plan.config, **load_kwargs)
         else:
