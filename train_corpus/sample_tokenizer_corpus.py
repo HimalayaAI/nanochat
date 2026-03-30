@@ -26,7 +26,7 @@ from typing import Any, Dict, Iterator, List, Optional, Pattern, Tuple
 
 import yaml
 from datasets import load_dataset
-from datasets import Dataset, Features, Value
+from datasets import Dataset, Features, Sequence, Value, get_dataset_infos
 from huggingface_hub import HfApi, get_token, login
 
 # Ensure project root is on sys.path for scripts.* imports
@@ -151,6 +151,7 @@ class SourcePlan:
     strata: Dict[str, List[str]]
     equal_strata: bool
     auto_discover: Optional[AutoDiscoverConfig]
+    fix_null_features: bool
 
 
 @dataclass
@@ -259,6 +260,7 @@ def build_sources(
             if stratify_by
             else None
         )
+        fix_null_features = bool(src.get("fix_null_features", cfg.get("fix_null_features", True)))
 
         source_key = f"{source_id}:{config or 'default'}:{split}"
         plans.append(
@@ -281,6 +283,7 @@ def build_sources(
                 strata=strata,
                 equal_strata=equal_strata,
                 auto_discover=auto_discover,
+                fix_null_features=fix_null_features,
             )
         )
     return plans
@@ -335,24 +338,121 @@ def write_checkpoint(path: Optional[str], data: Dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
+def _sanitize_feature(feature: Any) -> Any:
+    if isinstance(feature, Value):
+        if feature.dtype == "null":
+            return Value("string")
+        return feature
+    if isinstance(feature, Sequence):
+        return Sequence(_sanitize_feature(feature.feature), length=feature.length)
+    if isinstance(feature, dict):
+        return {key: _sanitize_feature(val) for key, val in feature.items()}
+    if isinstance(feature, Features):
+        return Features({key: _sanitize_feature(val) for key, val in feature.items()})
+    return feature
+
+
+def _get_features_from_server(plan: SourcePlan) -> Optional[Features]:
+    """Fallback: fetch feature schema from datasets-server."""
+    import json
+    import urllib.parse
+    import urllib.request
+
+    params = {"dataset": plan.source_id}
+    if plan.config:
+        params["config"] = plan.config
+    url = "https://datasets-server.huggingface.co/info?" + urllib.parse.urlencode(params)
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            payload = json.load(resp)
+    except Exception as exc:
+        logger.warning("datasets-server info failed for %s: %s", plan.source_key, exc)
+        return None
+
+    info = payload.get("dataset_info")
+    if not info:
+        infos = payload.get("dataset_infos") or {}
+        if plan.config:
+            info = infos.get(plan.config)
+        else:
+            info = next(iter(infos.values()), None)
+    if not info:
+        return None
+
+    features_raw = info.get("features")
+    if not features_raw:
+        return None
+    try:
+        return Features.from_dict(features_raw)
+    except Exception as exc:
+        logger.warning("Failed to parse features for %s: %s", plan.source_key, exc)
+        return None
+
+
+def _get_sanitized_features(plan: SourcePlan) -> Optional[Features]:
+    if not plan.fix_null_features:
+        return None
+    try:
+        infos = get_dataset_infos(plan.source_id)
+        info = None
+        if plan.config:
+            info = infos.get(plan.config)
+        else:
+            info = next(iter(infos.values())) if infos else None
+        features = info.features if info and getattr(info, "features", None) else None
+    except Exception as exc:
+        logger.warning("Failed to fetch dataset_infos for %s: %s", plan.source_key, exc)
+        features = None
+
+    if features is None:
+        features = _get_features_from_server(plan)
+
+    if features is None:
+        return None
+
+    sanitized = _sanitize_feature(features)
+    if isinstance(sanitized, Features):
+        return sanitized
+    if isinstance(sanitized, dict):
+        return Features(sanitized)
+    return None
+
+
 def iter_hf_rows(plan: SourcePlan) -> Iterator[Dict[str, Any]]:
     try:
+        features = _get_sanitized_features(plan)
+        load_kwargs = {"split": plan.split, "streaming": True}
+        if features is not None:
+            load_kwargs["features"] = features
         if plan.config:
-            ds = load_dataset(
-                plan.source_id, name=plan.config, split=plan.split, streaming=True
-            )
+            ds = load_dataset(plan.source_id, name=plan.config, **load_kwargs)
         else:
-            ds = load_dataset(plan.source_id, split=plan.split, streaming=True)
-        if plan.shuffle_buffer and plan.shuffle_buffer > 0:
-            try:
-                ds = ds.shuffle(buffer_size=plan.shuffle_buffer, seed=42)
-            except Exception:
-                logger.warning("Shuffle failed for %s; continuing without shuffle", plan.source_key)
-        for row in ds:
-            yield row
+            ds = load_dataset(plan.source_id, **load_kwargs)
+    except TypeError as exc:
+        if features is not None:
+            logger.warning(
+                "Feature override failed for %s (%s). Retrying without features.",
+                plan.source_key,
+                exc,
+            )
+            load_kwargs.pop("features", None)
+            if plan.config:
+                ds = load_dataset(plan.source_id, name=plan.config, **load_kwargs)
+            else:
+                ds = load_dataset(plan.source_id, **load_kwargs)
+        else:
+            raise
     except Exception as exc:
         logger.warning("Failed to load %s: %s", plan.source_key, exc)
-        return
+        raise
+
+    if plan.shuffle_buffer and plan.shuffle_buffer > 0:
+        try:
+            ds = ds.shuffle(buffer_size=plan.shuffle_buffer, seed=42)
+        except Exception:
+            logger.warning("Shuffle failed for %s; continuing without shuffle", plan.source_key)
+    for row in ds:
+        yield row
 
 
 def _select_top_categories(

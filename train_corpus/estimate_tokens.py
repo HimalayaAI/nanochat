@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import yaml
-from datasets import load_dataset, get_dataset_infos
+from datasets import Features, Sequence, Value, get_dataset_infos, load_dataset
 
 # Ensure project root is on sys.path for scripts.* imports
 import sys
@@ -113,6 +113,7 @@ class SourcePlan:
     include_other: bool
     sample_rows: int
     full_scan: bool
+    fix_null_features: bool
 
 
 def build_sources(cfg: Dict[str, Any]) -> List[SourcePlan]:
@@ -165,6 +166,7 @@ def build_sources(cfg: Dict[str, Any]) -> List[SourcePlan]:
         include_other = bool(src.get("include_other", True))
         sample_rows = int(src.get("sample_rows", cfg.get("sample_rows", 200000)))
         full_scan = bool(src.get("full_scan", cfg.get("full_scan", False)))
+        fix_null_features = bool(src.get("fix_null_features", cfg.get("fix_null_features", True)))
 
         filters = default_filters
         if isinstance(src.get("filters"), dict):
@@ -188,6 +190,7 @@ def build_sources(cfg: Dict[str, Any]) -> List[SourcePlan]:
                 include_other=include_other,
                 sample_rows=sample_rows,
                 full_scan=full_scan,
+                fix_null_features=fix_null_features,
             )
         )
     return plans
@@ -211,11 +214,67 @@ def get_num_rows(source_id: str, config: Optional[str], split: str) -> Optional[
         return None
 
 
+def _sanitize_feature(feature: Any) -> Any:
+    if isinstance(feature, Value):
+        if feature.dtype == "null":
+            return Value("string")
+        return feature
+    if isinstance(feature, Sequence):
+        return Sequence(_sanitize_feature(feature.feature), length=feature.length)
+    if isinstance(feature, dict):
+        return {key: _sanitize_feature(val) for key, val in feature.items()}
+    if isinstance(feature, Features):
+        return Features({key: _sanitize_feature(val) for key, val in feature.items()})
+    return feature
+
+
+def _get_sanitized_features(plan: SourcePlan) -> Optional[Features]:
+    if not plan.fix_null_features:
+        return None
+    try:
+        infos = get_dataset_infos(plan.source_id)
+        info = None
+        if plan.config:
+            info = infos.get(plan.config)
+        else:
+            info = next(iter(infos.values())) if infos else None
+        if not info or not getattr(info, "features", None):
+            return None
+        sanitized = _sanitize_feature(info.features)
+        if isinstance(sanitized, Features):
+            return sanitized
+        if isinstance(sanitized, dict):
+            return Features(sanitized)
+        return None
+    except Exception as exc:
+        logger.warning("Failed to fetch/sanitize features for %s: %s", plan.source_key, exc)
+        return None
+
+
 def iter_rows(plan: SourcePlan) -> Iterator[Dict[str, Any]]:
-    if plan.config:
-        ds = load_dataset(plan.source_id, name=plan.config, split=plan.split, streaming=True)
-    else:
-        ds = load_dataset(plan.source_id, split=plan.split, streaming=True)
+    features = _get_sanitized_features(plan)
+    load_kwargs = {"split": plan.split, "streaming": True}
+    if features is not None:
+        load_kwargs["features"] = features
+    try:
+        if plan.config:
+            ds = load_dataset(plan.source_id, name=plan.config, **load_kwargs)
+        else:
+            ds = load_dataset(plan.source_id, **load_kwargs)
+    except TypeError as exc:
+        if features is not None:
+            logger.warning(
+                "Feature override failed for %s (%s). Retrying without features.",
+                plan.source_key,
+                exc,
+            )
+            load_kwargs.pop("features", None)
+            if plan.config:
+                ds = load_dataset(plan.source_id, name=plan.config, **load_kwargs)
+            else:
+                ds = load_dataset(plan.source_id, **load_kwargs)
+        else:
+            raise
     if plan.shuffle_buffer and plan.shuffle_buffer > 0:
         try:
             ds = ds.shuffle(buffer_size=plan.shuffle_buffer, seed=42)

@@ -46,7 +46,7 @@ sources:
     split: train
     field: text
     lang: deva_mix
-    stratify_by: [language, source]
+    stratify_by: source
 
   # Hindi (AI4Bharat + FineWeb + OSCAR)
   - id: ai4bharat/sangraha
