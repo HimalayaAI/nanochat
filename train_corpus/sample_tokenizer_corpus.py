@@ -148,6 +148,7 @@ class SourcePlan:
     filters: Optional[FilterSpec]
     shuffle_buffer: int
     data_files: Optional[Any]
+    columns: Optional[List[str]]
     stratify_by: List[str]
     strata: Dict[str, List[str]]
     equal_strata: bool
@@ -205,6 +206,15 @@ def build_sources(
         lang = src.get("lang", "unknown")
         shuffle_buffer = int(src.get("shuffle_buffer", 10000))
         data_files = src.get("data_files")
+        raw_columns = src.get("columns")
+        if raw_columns is None:
+            columns = None
+        elif isinstance(raw_columns, str):
+            columns = [raw_columns]
+        elif isinstance(raw_columns, list):
+            columns = [str(v) for v in raw_columns]
+        else:
+            raise SystemExit(f"Invalid columns value for {source_id}: {raw_columns}")
         weight = float(src.get("weight", 0.0))
 
         if not source_id:
@@ -286,6 +296,7 @@ def build_sources(
                 filters=filters,
                 shuffle_buffer=shuffle_buffer,
                 data_files=data_files,
+                columns=columns,
                 stratify_by=stratify_by,
                 strata=strata,
                 equal_strata=equal_strata,
@@ -437,6 +448,8 @@ def iter_hf_rows(plan: SourcePlan) -> Iterator[Dict[str, Any]]:
             load_kwargs["encoding_errors"] = plan.text_encoding_errors
         if plan.data_files:
             load_kwargs["data_files"] = plan.data_files
+        if plan.columns:
+            load_kwargs["columns"] = plan.columns
         if features is not None:
             load_kwargs["features"] = features
         if plan.config:
@@ -453,6 +466,7 @@ def iter_hf_rows(plan: SourcePlan) -> Iterator[Dict[str, Any]]:
         load_kwargs.pop("encoding", None)
         load_kwargs.pop("encoding_errors", None)
         load_kwargs.pop("data_files", None)
+        load_kwargs.pop("columns", None)
         if plan.config:
             ds = load_dataset(plan.source_id, name=plan.config, **load_kwargs)
         else:

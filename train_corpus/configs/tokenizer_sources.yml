@@ -81,6 +81,7 @@ sources:
     split: train
     field: text
     lang: hi
+    columns: [text]
     filters:
       min_devanagari_ratio: 0.3
 
