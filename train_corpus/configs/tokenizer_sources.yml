@@ -67,7 +67,7 @@ sources:
       min_devanagari_ratio: 0.3
     text_encoding_errors: ignore
 
-  - id: uavaidya/hindi-fineweb2-40b
+  - id: uvaidya/hindi-fineweb2-40b
     type: hf
     split: train
     field: text
