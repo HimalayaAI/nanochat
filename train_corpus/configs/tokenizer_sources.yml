@@ -114,12 +114,17 @@ sources:
       min_words: 0
       short_text: null
 
-  - id: bigcode/the-stack-dedup
+  - id: ronantakizawa/github-top-code
     type: hf
     split: train
     field: content
     lang: code
-    stratify_by: lang
+    stratify_by: file_language
+    auto_discover:
+      warmup_rows: 50000
+      max_categories: 10
+      min_fraction: 0.01
+      include_other: true
     filters:
       min_devanagari_ratio: 0.0
       min_words: 0
