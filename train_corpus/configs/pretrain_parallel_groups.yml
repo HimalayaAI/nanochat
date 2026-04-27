@@ -1,34 +1,29 @@
-- name: ne_deva
-  weight: 0.40
+- name: harl_ne_deva
+  weight: 0.70
   equal_split: true
   sources:
     - himalaya-ai/nepali-corpus-compile
     - himalaya-ai/nepali-pretrain-corpus
-    - ai4bharat/sangraha:verified:nep
-  shard_prefix: pretrain_ne_deva
-  log: data/pretrain_ne_deva.log
-
-- name: deva_mix
-  weight: 0.05
-  equal_split: true
-  sources:
     - himalaya-ai/devanagari_pretrain
-  shard_prefix: pretrain_deva_mix
-  log: data/pretrain_deva_mix.log
+    - himalaya-ai/sangraha_nepali
+    - himalaya-ai/wikipedia_nepali_deva
+    - himalaya-ai/nepali-news-corpus
+    - himalaya-ai/cc100-nepali
+    - himalaya-ai/nepali_pdf_corpus
+  shard_prefix: pretrain_harl_ne_deva
+  log: data/pretrain_harl_ne_deva.log
 
-- name: hi_deva
-  weight: 0.18
+- name: harl_latin
+  weight: 0.10
   equal_split: true
   sources:
-    - ai4bharat/sangraha:verified:hin
-    - ai4bharat/IndicCorpV2:indiccorp_v2:hin_Deva
-    - zicsx/OSCAR-2301-Hindi
-    - uvaidya/hindi-fineweb2-40b
-  shard_prefix: pretrain_hi_deva
-  log: data/pretrain_hi_deva.log
+    - himalaya-ai/nepali-roman-pretrain
+    - himalaya-ai/indic_latn_pretrain
+  shard_prefix: pretrain_harl_latin
+  log: data/pretrain_harl_latin.log
 
-- name: en
-  weight: 0.18
+- name: en_cap
+  weight: 0.12
   equal_split: true
   sources:
     - HuggingFaceFW/fineweb-edu
@@ -36,8 +31,8 @@
   shard_prefix: pretrain_en
   log: data/pretrain_en.log
 
-- name: code
-  weight: 0.07
+- name: code_cap
+  weight: 0.05
   equal_split: true
   sources:
     - OpenCoder-LLM/opc-fineweb-code-corpus
@@ -45,7 +40,7 @@
   shard_prefix: pretrain_code
   log: data/pretrain_code.log
 
-- name: math
+- name: math_cap
   weight: 0.03
   equal_split: true
   sources:
@@ -53,27 +48,3 @@
     - HuggingFaceTB/finemath:finemath-3plus:train
   shard_prefix: pretrain_math
   log: data/pretrain_math.log
-
-- name: roman_ne
-  weight: 0.04
-  equal_split: true
-  sources:
-    - himalaya-ai/nepali-roman-pretrain
-  shard_prefix: pretrain_roman_ne
-  log: data/pretrain_roman_ne.log
-
-- name: indic_latn
-  weight: 0.04
-  equal_split: true
-  sources:
-    - himalaya-ai/indic_latn_pretrain
-  shard_prefix: pretrain_indic_latn
-  log: data/pretrain_indic_latn.log
-
-- name: roman_hi
-  weight: 0.01
-  equal_split: true
-  sources:
-    - ai4bharat/sangraha:synthetic:hin_Latn
-  shard_prefix: pretrain_roman_hi
-  log: data/pretrain_roman_hi.log

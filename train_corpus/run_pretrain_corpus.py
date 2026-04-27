@@ -24,8 +24,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--sources-config",
-        default="train_corpus/configs/tokenizer_sources.yml",
-        help="Source definitions YAML (defaults to tokenizer_sources.yml)",
+        default="train_corpus/configs/pretrain_sources.yml",
+        help="Source definitions YAML (defaults to pretrain_sources.yml)",
     )
     parser.add_argument(
         "--groups-config",
