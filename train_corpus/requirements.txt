@@ -5,3 +5,5 @@ tiktoken
 pyarrow
 fsspec
 numpy
+transformers
+safetensors
