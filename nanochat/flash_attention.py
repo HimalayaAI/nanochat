@@ -107,13 +107,6 @@ ATTN_BACKEND = _resolve_backend()
 USE_FA3 = ATTN_BACKEND == "fa3"
 USE_FA4 = ATTN_BACKEND == "fa4"
 _fa4_runtime_fallback_warned = False
-_fa4_runtime_enabled = USE_FA4
-
-try:
-    from torch._dynamo import disable as _dynamo_disable
-except Exception:
-    def _dynamo_disable(fn):
-        return fn
 
 
 # =============================================================================
@@ -186,15 +179,6 @@ def _fa4_attention(q, k, v, causal=False, window_size=(-1, -1)):
         out = out[0]
     return out
 
-
-@_dynamo_disable
-def _fa4_attention_nodynamo(q, k, v, causal=False, window_size=(-1, -1)):
-    """
-    Run FA4 outside TorchDynamo tracing.
-    This avoids Dynamo/CUTLASS tracing incompatibilities on some stacks.
-    """
-    return _fa4_attention(q, k, v, causal=causal, window_size=window_size)
-
 # =============================================================================
 # Public API: Same interface as FA3
 # =============================================================================
@@ -213,19 +197,14 @@ def flash_attn_func(q, k, v, causal=False, window_size=(-1, -1)):
     if USE_FA3:
         return _fa3.flash_attn_func(q, k, v, causal=causal, window_size=window_size)
     if USE_FA4:
-        global _fa4_runtime_fallback_warned, _fa4_runtime_enabled
-        if not _fa4_runtime_enabled:
-            # FA4 failed earlier in this process; stick to SDPA to avoid repeated exceptions/recompiles.
-            pass
-        else:
-            try:
-                return _fa4_attention_nodynamo(q, k, v, causal=causal, window_size=window_size)
-            except Exception as e:
-                # Safe fallback so experiments can continue even when FA4 edge-cases appear.
-                _fa4_runtime_enabled = False
-                if not _fa4_runtime_fallback_warned:
-                    warnings.warn(f"FA4 attention call failed once, falling back to SDPA. Error: {e}")
-                    _fa4_runtime_fallback_warned = True
+        global _fa4_runtime_fallback_warned
+        try:
+            return _fa4_attention(q, k, v, causal=causal, window_size=window_size)
+        except Exception as e:
+            # Safe fallback so experiments can continue even when FA4 edge-cases appear.
+            if not _fa4_runtime_fallback_warned:
+                warnings.warn(f"FA4 attention call failed once, falling back to SDPA. Error: {e}")
+                _fa4_runtime_fallback_warned = True
 
     # SDPA fallback: transpose (B, T, H, D) -> (B, H, T, D)
     q = q.transpose(1, 2)
