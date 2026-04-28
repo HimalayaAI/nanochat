@@ -1,11 +1,8 @@
 """
-Unified Flash Attention interface with automatic FA3 / FA4 / SDPA switching.
+Unified Flash Attention interface with automatic FA3/SDPA switching.
 
-Exports `flash_attn` module that matches the FA3 call sites in this repo, while
-choosing the fastest available backend at runtime:
-- FA3 (Hopper, via kernels hub)
-- FA4 (flash-attn-4 CuTe backend)
-- SDPA fallback (works everywhere)
+Exports `flash_attn` module that matches the FA3 API exactly, but falls back
+to PyTorch SDPA on non-Hopper GPUs (including Blackwell), MPS, and CPU.
 
 Usage (drop-in replacement for FA3):
     from nanochat.flash_attention import flash_attn
@@ -16,12 +13,8 @@ Usage (drop-in replacement for FA3):
     # Inference (with KV cache)
     y = flash_attn.flash_attn_with_kvcache(q, k_cache, v_cache, k=k, v=v, ...)
 """
-import inspect
-import os
-import warnings
 import torch
 import torch.nn.functional as F
-from types import SimpleNamespace
 
 
 # =============================================================================
@@ -37,6 +30,7 @@ def _load_flash_attention_3():
         # Ada (sm89), Blackwell (sm100) need SDPA fallback until FA3 is recompiled
         if major != 9:
             return None
+        import os
         os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
         from kernels import get_kernel
         return get_kernel('varunneal/flash-attention-3').flash_attn_interface
@@ -44,69 +38,29 @@ def _load_flash_attention_3():
         return None
 
 
-def _load_flash_attention_4():
-    """Try to load Flash Attention 4 (CuTe backend)."""
-    if not torch.cuda.is_available():
-        return None
-    try:
-        # flash-attn-4 exposes this path
-        from flash_attn.cute import flash_attn_func as fa4_func
-        sig = inspect.signature(fa4_func)
-        return SimpleNamespace(func=fa4_func, sig=sig)
-    except Exception:
-        return None
-
-
 _fa3 = _load_flash_attention_3()
 HAS_FA3 = _fa3 is not None
-_fa4 = _load_flash_attention_4()
-HAS_FA4 = _fa4 is not None
+
+# Override for testing: set to 'fa3', 'sdpa', or None (auto)
+_override_impl = None
 
 
-def _get_requested_backend():
-    """
-    Optional backend override through env var:
-      NANOCHAT_ATTN_BACKEND in {auto, fa3, fa4, sdpa}
-    """
-    value = os.getenv("NANOCHAT_ATTN_BACKEND", "auto").strip().lower()
-    allowed = {"auto", "fa3", "fa4", "sdpa"}
-    return value if value in allowed else "auto"
+def _resolve_use_fa3():
+    """Decide once whether to use FA3, based on availability, override, and dtype."""
+    if _override_impl == 'fa3':
+        assert HAS_FA3, "Cannot override to FA3: not available on this hardware"
+        return True
+    if _override_impl == 'sdpa':
+        return False
+    if HAS_FA3:
+        # FA3 Hopper kernels only support bf16 and fp8; fp16/fp32 must use SDPA fallback
+        from nanochat.common import COMPUTE_DTYPE
+        if COMPUTE_DTYPE == torch.bfloat16:
+            return True
+        return False
+    return False
 
-
-def _resolve_backend():
-    """
-    Decide once which backend to use by default.
-    Priority in auto mode: FA3 (Hopper bf16) -> FA4 -> SDPA.
-    """
-    requested = _get_requested_backend()
-    from nanochat.common import COMPUTE_DTYPE
-
-    if requested == "fa3":
-        assert HAS_FA3, "NANOCHAT_ATTN_BACKEND=fa3 but FA3 is unavailable"
-        assert COMPUTE_DTYPE == torch.bfloat16, (
-            f"NANOCHAT_ATTN_BACKEND=fa3 requires bf16, got {COMPUTE_DTYPE}"
-        )
-        return "fa3"
-
-    if requested == "fa4":
-        assert HAS_FA4, "NANOCHAT_ATTN_BACKEND=fa4 but FA4 is unavailable"
-        return "fa4"
-
-    if requested == "sdpa":
-        return "sdpa"
-
-    # auto
-    if HAS_FA3 and COMPUTE_DTYPE == torch.bfloat16:
-        return "fa3"
-    if HAS_FA4 and torch.cuda.is_available():
-        return "fa4"
-    return "sdpa"
-
-
-ATTN_BACKEND = _resolve_backend()
-USE_FA3 = ATTN_BACKEND == "fa3"
-USE_FA4 = ATTN_BACKEND == "fa4"
-_fa4_runtime_fallback_warned = False
+USE_FA3 = _resolve_use_fa3()
 
 
 # =============================================================================
@@ -147,34 +101,6 @@ def _sdpa_attention(q, k, v, window_size, enable_gqa):
 
     return F.scaled_dot_product_attention(q, k, v, attn_mask=mask, enable_gqa=enable_gqa)
 
-
-def _fa4_attention(q, k, v, causal=False, window_size=(-1, -1)):
-    """
-    Run FA4 with a conservative call contract.
-    We only use FA4 for full-context causal attention in training.
-    """
-    # Keep behavior deterministic: for unsupported features, use SDPA fallback.
-    if window_size != (-1, -1):
-        raise RuntimeError("FA4 path currently supports full-context only in this wrapper")
-    if not causal:
-        raise RuntimeError("FA4 path currently expects causal=True in this wrapper")
-
-    kwargs = {}
-    params = _fa4.sig.parameters
-    if "causal" in params:
-        kwargs["causal"] = causal
-    if "window_size" in params:
-        kwargs["window_size"] = window_size
-    if "dropout_p" in params:
-        kwargs["dropout_p"] = 0.0
-    if "softmax_scale" in params:
-        kwargs["softmax_scale"] = None
-
-    out = _fa4.func(q, k, v, **kwargs)
-    if isinstance(out, tuple):
-        out = out[0]
-    return out
-
 # =============================================================================
 # Public API: Same interface as FA3
 # =============================================================================
@@ -192,15 +118,6 @@ def flash_attn_func(q, k, v, causal=False, window_size=(-1, -1)):
     """
     if USE_FA3:
         return _fa3.flash_attn_func(q, k, v, causal=causal, window_size=window_size)
-    if USE_FA4:
-        global _fa4_runtime_fallback_warned
-        try:
-            return _fa4_attention(q, k, v, causal=causal, window_size=window_size)
-        except Exception as e:
-            # Safe fallback so experiments can continue even when FA4 edge-cases appear.
-            if not _fa4_runtime_fallback_warned:
-                warnings.warn(f"FA4 attention call failed once, falling back to SDPA. Error: {e}")
-                _fa4_runtime_fallback_warned = True
 
     # SDPA fallback: transpose (B, T, H, D) -> (B, H, T, D)
     q = q.transpose(1, 2)
@@ -234,8 +151,6 @@ def flash_attn_with_kvcache(q, k_cache, v_cache, k=None, v=None, cache_seqlens=N
             q, k_cache, v_cache, k=k, v=v, cache_seqlens=cache_seqlens,
             causal=causal, window_size=window_size
         )
-    # NOTE: FA4 decode/KV-cache path is not wired yet in this wrapper.
-    # Inference remains on SDPA unless FA3 is active.
 
     # SDPA fallback: manually manage KV cache
     B, T_new, H, D = q.shape
@@ -265,6 +180,7 @@ def flash_attn_with_kvcache(q, k_cache, v_cache, k=None, v=None, cache_seqlens=N
 # =============================================================================
 # Export: flash_attn module interface (drop-in replacement for FA3)
 # =============================================================================
+from types import SimpleNamespace
 flash_attn = SimpleNamespace(
     flash_attn_func=flash_attn_func,
     flash_attn_with_kvcache=flash_attn_with_kvcache,
