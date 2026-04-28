@@ -153,18 +153,22 @@ def _fa4_attention(q, k, v, causal=False, window_size=(-1, -1)):
     Run FA4 with a conservative call contract.
     We only use FA4 for full-context causal attention in training.
     """
-    # Keep behavior deterministic: for unsupported features, use SDPA fallback.
-    if window_size != (-1, -1):
-        raise RuntimeError("FA4 path currently supports full-context only in this wrapper")
     if not causal:
         raise RuntimeError("FA4 path currently expects causal=True in this wrapper")
+
+    # In this codebase, full-context layers are represented as (sequence_len, 0),
+    # not only (-1, -1). Treat both as full-context.
+    left, right = window_size
+    seq_len = q.size(1)  # q is (B, T, H, D)
+    is_full_context = (right == 0) and (left < 0 or left >= seq_len)
+    if not is_full_context:
+        raise RuntimeError("FA4 path currently supports full-context only in this wrapper")
 
     kwargs = {}
     params = _fa4.sig.parameters
     if "causal" in params:
         kwargs["causal"] = causal
-    if "window_size" in params:
-        kwargs["window_size"] = window_size
+    # For full-context, omit window_size and let backend take its fast causal path.
     if "dropout_p" in params:
         kwargs["dropout_p"] = 0.0
     if "softmax_scale" in params:
