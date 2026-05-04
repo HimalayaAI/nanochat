@@ -288,7 +288,9 @@ MODELING_PY = dedent(
         def all_tied_weights_keys(self):
             # Compatibility shim for some transformers/accelerate versions that
             # access `model.all_tied_weights_keys` during device_map inference.
-            return list(getattr(self, "_tied_weights_keys", []))
+            # Newer codepaths call `.keys()` on this object, so expose a dict-like
+            # mapping regardless of the underlying list/tuple representation.
+            return {k: None for k in getattr(self, "_tied_weights_keys", [])}
 
         def get_input_embeddings(self):
             return self.model.transformer["wte"]
