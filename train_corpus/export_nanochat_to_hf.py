@@ -79,7 +79,7 @@ MODELING_PY = dedent(
     from transformers import PreTrainedModel
     from transformers.modeling_outputs import CausalLMOutputWithPast
 
-    from configuration_nanochat import NanochatConfig
+    from .configuration_nanochat import NanochatConfig
 
 
     def _norm(x):
