@@ -80,6 +80,32 @@ def _validate_auto_map_is_string(obj: Dict[str, Any], filename: str, key: str, r
         )
 
 
+def _validate_tokenizer_auto_map(value: Any, filename: str) -> str:
+    # Transformers AutoTokenizer expects either:
+    # - a string class path, or
+    # - [slow_class_path, fast_class_path_or_none]
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        if len(value) != 2:
+            raise TypeError(
+                f"{filename}: `auto_map.AutoTokenizer` list/tuple must have 2 entries, got {len(value)}"
+            )
+        slow_cls, fast_cls = value
+        if not isinstance(slow_cls, str):
+            raise TypeError(
+                f"{filename}: slow tokenizer class path must be string, got {type(slow_cls).__name__}"
+            )
+        if fast_cls is not None and not isinstance(fast_cls, str):
+            raise TypeError(
+                f"{filename}: fast tokenizer class path must be string or null, got {type(fast_cls).__name__}"
+            )
+        return slow_cls
+    raise TypeError(
+        f"{filename}: `auto_map.AutoTokenizer` must be string or [slow, fast], got {type(value).__name__}"
+    )
+
+
 def _check_local_required_files(local_dir: Path) -> None:
     required = [
         "config.json",
@@ -160,10 +186,17 @@ def main() -> None:
     _validate_auto_map_is_string(config, "config.json", "AutoConfig", required=True)
     _validate_auto_map_is_string(config, "config.json", "AutoModelForCausalLM", required=True)
     _validate_auto_map_is_string(config, "config.json", "AutoTokenizer", required=True)
-    _validate_auto_map_is_string(tokenizer_config, "tokenizer_config.json", "AutoTokenizer", required=True)
 
-    if tokenizer_config.get("auto_map", {}).get("AutoTokenizer") != config.get("auto_map", {}).get("AutoTokenizer"):
-        raise ValueError("AutoTokenizer mapping differs between config.json and tokenizer_config.json")
+    tokenizer_auto_map = tokenizer_config.get("auto_map", {}).get("AutoTokenizer", None)
+    if tokenizer_auto_map is None:
+        raise KeyError("tokenizer_config.json: missing `auto_map.AutoTokenizer`")
+    tokenizer_slow_cls = _validate_tokenizer_auto_map(tokenizer_auto_map, "tokenizer_config.json")
+    config_auto_cls = config.get("auto_map", {}).get("AutoTokenizer")
+    if tokenizer_slow_cls != config_auto_cls:
+        raise ValueError(
+            "AutoTokenizer mapping mismatch: "
+            f"config.json has {config_auto_cls!r}, tokenizer_config.json slow path has {tokenizer_slow_cls!r}"
+        )
 
     print(f"Config checks passed for {location}")
     _run_load_and_generate(

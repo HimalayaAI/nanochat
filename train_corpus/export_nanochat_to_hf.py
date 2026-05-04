@@ -587,7 +587,9 @@ def main() -> None:
     tokenizer_config = {
         "tokenizer_class": "NanochatTokenizer",
         "auto_map": {
-            "AutoTokenizer": "tokenization_nanochat.NanochatTokenizer",
+            # AutoTokenizer currently expects a pair [slow_class, fast_class].
+            # We only implement the slow tokenizer for this custom code path.
+            "AutoTokenizer": ["tokenization_nanochat.NanochatTokenizer", None],
         },
         "tokenizer_file": "tokenizer.pkl",
         "bos_token": "<|bos|>",
