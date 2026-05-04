@@ -278,10 +278,17 @@ MODELING_PY = dedent(
         config_class = NanochatConfig
         base_model_prefix = "model"
         main_input_name = "input_ids"
+        _tied_weights_keys = []
 
         def __init__(self, config):
             super().__init__(config)
             self.model = NanochatBackbone(config)
+
+        @property
+        def all_tied_weights_keys(self):
+            # Compatibility shim for some transformers/accelerate versions that
+            # access `model.all_tied_weights_keys` during device_map inference.
+            return list(getattr(self, "_tied_weights_keys", []))
 
         def get_input_embeddings(self):
             return self.model.transformer["wte"]
