@@ -1,0 +1,116 @@
+sources:
+  # Devanagari-focused SFT compile.
+  # Intentionally excludes himalaya-ai/nepali-sft-dataset.
+
+  # 1) soketlabs/bhasha-sft (user requested)
+  - id: soketlabs/bhasha-sft
+    config: indic
+    adapter: sharegpt_messages
+    message_field: messages
+    split: train
+    streaming: true
+    shuffle_buffer: 50000
+    max_conversations: 300000
+    must_equal:
+      script: Deva
+    require_devanagari: true
+    min_devanagari_chars: 24
+    min_devanagari_ratio: 0.40
+
+  # 2) TokenBender/sentence_retrieval_hindi_SFT (user requested)
+  # Task is mapped to system to preserve retrieval intent.
+  - id: TokenBender/sentence_retrieval_hindi_SFT
+    adapter: qa_pair
+    split: train
+    streaming: true
+    shuffle_buffer: 50000
+    max_conversations: 100000
+    system_field: task
+    prompt_field: query
+    response_field: pos
+    require_devanagari: true
+    min_devanagari_chars: 20
+    min_devanagari_ratio: 0.35
+
+  # 3) ai4bharat/indic-instruct-data-v0.1 (user requested)
+  # Hindi split only; keeps Devanagari-heavy rows via text script filter.
+  - id: ai4bharat/indic-instruct-data-v0.1
+    config: anudesh
+    adapter: auto
+    split: hi
+    streaming: true
+    shuffle_buffer: 50000
+    max_conversations: 120000
+    require_devanagari: true
+    min_devanagari_chars: 20
+    min_devanagari_ratio: 0.35
+
+  - id: ai4bharat/indic-instruct-data-v0.1
+    config: oasst1
+    adapter: auto
+    split: hi
+    streaming: true
+    shuffle_buffer: 50000
+    max_conversations: 120000
+    require_devanagari: true
+    min_devanagari_chars: 20
+    min_devanagari_ratio: 0.35
+
+  - id: ai4bharat/indic-instruct-data-v0.1
+    config: wikihow
+    adapter: auto
+    split: hi
+    streaming: true
+    shuffle_buffer: 50000
+    max_conversations: 120000
+    require_devanagari: true
+    min_devanagari_chars: 20
+    min_devanagari_ratio: 0.35
+
+  # 4) sarvamai/samvaad-hi-v1 (user requested)
+  - id: sarvamai/samvaad-hi-v1
+    adapter: sharegpt_messages
+    message_field: messages
+    split: train
+    streaming: true
+    shuffle_buffer: 50000
+    max_conversations: 100000
+    require_devanagari: true
+    min_devanagari_chars: 24
+    min_devanagari_ratio: 0.40
+
+  # Additional vetted Indic instruct/SFT datasets (requested "find more"):
+  # ai4bharat/indic-align: include instruct subsets only (exclude toxic subsets).
+  - id: ai4bharat/indic-align
+    config: Anudesh
+    adapter: interaction_pairs
+    split: train
+    streaming: true
+    shuffle_buffer: 50000
+    max_conversations: 60000
+    require_devanagari: true
+    min_devanagari_chars: 20
+    min_devanagari_ratio: 0.35
+
+  - id: ai4bharat/indic-align
+    config: WikiHow
+    adapter: interaction_pairs
+    split: train
+    streaming: true
+    shuffle_buffer: 50000
+    max_conversations: 60000
+    require_devanagari: true
+    min_devanagari_chars: 20
+    min_devanagari_ratio: 0.35
+
+  # Hindi SFT dataset with message format; script filter keeps Devanagari rows.
+  - id: smangrul/hindi_instruct_v1
+    adapter: sharegpt_messages
+    message_field: messages
+    split: train
+    streaming: true
+    shuffle_buffer: 50000
+    max_conversations: 50000
+    require_devanagari: true
+    min_devanagari_chars: 20
+    min_devanagari_ratio: 0.35

@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -44,6 +45,8 @@ SHAREGPT_TO_CUSTOM = {
     "assistant": "assistant",
     "model": "assistant",
 }
+
+DEVANAGARI_RE = re.compile(r"[\u0900-\u097F\uA8E0-\uA8FF\U00011B00-\U00011B5F]")
 
 
 @dataclass
@@ -225,6 +228,70 @@ def conv_from_pair(row: Dict[str, Any], prompt_field: str, response_field: str) 
     ]
 
 
+def conv_from_pair_with_system(
+    row: Dict[str, Any],
+    prompt_field: str,
+    response_field: str,
+    system_field: Optional[str] = None,
+    prepend_prompt_fields: Optional[Sequence[str]] = None,
+) -> Optional[List[Dict[str, str]]]:
+    prompt_core = extract_text(row.get(prompt_field, ""))
+    response = extract_text(row.get(response_field, ""))
+    if not prompt_core or not response:
+        return None
+
+    prompt_parts: List[str] = []
+    for fld in prepend_prompt_fields or []:
+        txt = extract_text(row.get(fld, ""))
+        if txt:
+            prompt_parts.append(txt)
+    prompt_parts.append(prompt_core)
+    prompt = "\n\n".join(prompt_parts)
+
+    out: List[Dict[str, str]] = []
+    if system_field:
+        system_text = extract_text(row.get(system_field, ""))
+        if system_text:
+            out.append({"from": "system", "value": system_text})
+    out.extend(
+        [
+            {"from": "human", "value": prompt},
+            {"from": "gpt", "value": response},
+        ]
+    )
+    return out
+
+
+def conv_from_interactions(
+    row: Dict[str, Any],
+    field: str = "interactions",
+) -> Optional[List[Dict[str, str]]]:
+    interactions = row.get(field)
+    if not isinstance(interactions, list) or not interactions:
+        return None
+
+    out: List[Dict[str, str]] = []
+    for item in interactions:
+        user_text = ""
+        assistant_text = ""
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            user_text = extract_text(item[0])
+            assistant_text = extract_text(item[1])
+        elif isinstance(item, dict):
+            user_text = extract_text(item.get("user", item.get("prompt", item.get("query", ""))))
+            assistant_text = extract_text(
+                item.get("assistant", item.get("response", item.get("answer", "")))
+            )
+        if not user_text or not assistant_text:
+            continue
+        out.append({"from": "human", "value": user_text})
+        out.append({"from": "gpt", "value": assistant_text})
+
+    if len(out) < 2:
+        return None
+    return out
+
+
 def autodetect_conversation(row: Dict[str, Any]) -> Optional[List[Dict[str, str]]]:
     # 1) Standard message arrays
     for key in ("conversations", "messages"):
@@ -313,6 +380,23 @@ def row_matches_filters(row: Dict[str, Any], src_cfg: Dict[str, Any]) -> bool:
     return True
 
 
+def sharegpt_matches_script_filter(sharegpt_conv: Sequence[Dict[str, str]], src_cfg: Dict[str, Any]) -> bool:
+    # Optional text-level guardrail for script-specific mixtures.
+    if not bool(src_cfg.get("require_devanagari", False)):
+        return True
+
+    min_chars = int(src_cfg.get("min_devanagari_chars", 16))
+    min_ratio = float(src_cfg.get("min_devanagari_ratio", 0.35))
+    combined = "\n".join(extract_text(m.get("value", "")) for m in sharegpt_conv).strip()
+    if not combined:
+        return False
+
+    deva_count = len(DEVANAGARI_RE.findall(combined))
+    non_ws_count = sum(1 for ch in combined if not ch.isspace())
+    ratio = deva_count / max(1, non_ws_count)
+    return deva_count >= min_chars and ratio >= min_ratio
+
+
 def row_to_sharegpt(row: Dict[str, Any], src_cfg: Dict[str, Any]) -> Optional[List[Dict[str, str]]]:
     adapter = str(src_cfg.get("adapter", "auto")).strip().lower()
     if adapter == "sharegpt_conversations":
@@ -336,11 +420,18 @@ def row_to_sharegpt(row: Dict[str, Any], src_cfg: Dict[str, Any]) -> Optional[Li
             src_cfg.get("response_field", "response"),
         )
     if adapter == "qa_pair":
-        return conv_from_pair(
+        prepend_fields = src_cfg.get("prepend_prompt_fields", []) or []
+        if prepend_fields and not isinstance(prepend_fields, list):
+            raise ValueError(f"prepend_prompt_fields must be a list for source={src_cfg.get('id')}")
+        return conv_from_pair_with_system(
             row,
             src_cfg.get("prompt_field", "prompt"),
             src_cfg.get("response_field", "response"),
+            src_cfg.get("system_field"),
+            prepend_fields,
         )
+    if adapter == "interaction_pairs":
+        return conv_from_interactions(row, src_cfg.get("interaction_field", "interactions"))
     if adapter == "auto":
         return autodetect_conversation(row)
     raise ValueError(f"Unknown adapter: {adapter}")
@@ -445,6 +536,9 @@ def main() -> None:
 
                 sharegpt_conv = row_to_sharegpt(row, src_cfg)
                 if sharegpt_conv is None:
+                    src_stats.rows_dropped += 1
+                    continue
+                if not sharegpt_matches_script_filter(sharegpt_conv, src_cfg):
                     src_stats.rows_dropped += 1
                     continue
 
