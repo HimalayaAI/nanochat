@@ -593,7 +593,6 @@ def main() -> None:
             # We only implement the slow tokenizer for this custom code path.
             "AutoTokenizer": ["tokenization_nanochat.NanochatTokenizer", None],
         },
-        "vocab_file": "tokenizer.pkl",
         "bos_token": "<|bos|>",
         "eos_token": "<|bos|>",
         "pad_token": "<|bos|>",
