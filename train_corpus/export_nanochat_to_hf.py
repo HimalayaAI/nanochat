@@ -342,20 +342,22 @@ TOKENIZER_PY = dedent(
 
 
     class NanochatTokenizer(PreTrainedTokenizer):
-        vocab_files_names = {"tokenizer_file": "tokenizer.pkl"}
+        # Use `vocab_file` (not `tokenizer_file`) to avoid collision with the
+        # internal `tokenizer_file` reserved for fast-tokenizer JSON handling.
+        vocab_files_names = {"vocab_file": "tokenizer.pkl"}
         model_input_names = ["input_ids", "attention_mask"]
 
-        def __init__(self, tokenizer_file=None, **kwargs):
-            default_name = self.vocab_files_names["tokenizer_file"]
-            if tokenizer_file is None:
-                tokenizer_file = default_name
+        def __init__(self, vocab_file=None, **kwargs):
+            default_name = self.vocab_files_names["vocab_file"]
+            if vocab_file is None:
+                vocab_file = default_name
 
             # Resolve both absolute and module-relative tokenizer paths so loading
             # works from local dirs and HF cache snapshots.
-            candidate_paths = [tokenizer_file]
-            if not os.path.isabs(tokenizer_file):
+            candidate_paths = [vocab_file]
+            if not os.path.isabs(vocab_file):
                 module_dir = os.path.dirname(__file__)
-                candidate_paths.append(os.path.join(module_dir, tokenizer_file))
+                candidate_paths.append(os.path.join(module_dir, vocab_file))
                 candidate_paths.append(os.path.join(module_dir, default_name))
             resolved = next((p for p in candidate_paths if p and os.path.exists(p)), None)
             if resolved is None:
@@ -364,7 +366,7 @@ TOKENIZER_PY = dedent(
                     "Ensure tokenizer.pkl is present in the model repo."
                 )
 
-            self.tokenizer_file = resolved
+            self.vocab_file = resolved
             with open(resolved, "rb") as f:
                 self._enc = pickle.load(f)
             self._special_to_id = dict(getattr(self._enc, "_special_tokens", {}))
@@ -438,7 +440,7 @@ TOKENIZER_PY = dedent(
             os.makedirs(save_directory, exist_ok=True)
             name = "tokenizer.pkl" if filename_prefix is None else f"{filename_prefix}-tokenizer.pkl"
             out = os.path.join(save_directory, name)
-            shutil.copy2(self.tokenizer_file, out)
+            shutil.copy2(self.vocab_file, out)
             return (out,)
     """
 ).strip() + "\n"
@@ -591,7 +593,7 @@ def main() -> None:
             # We only implement the slow tokenizer for this custom code path.
             "AutoTokenizer": ["tokenization_nanochat.NanochatTokenizer", None],
         },
-        "tokenizer_file": "tokenizer.pkl",
+        "vocab_file": "tokenizer.pkl",
         "bos_token": "<|bos|>",
         "eos_token": "<|bos|>",
         "pad_token": "<|bos|>",
