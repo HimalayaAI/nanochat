@@ -528,7 +528,7 @@ def main() -> None:
         "auto_map": {
             "AutoConfig": "configuration_nanochat.NanochatConfig",
             "AutoModelForCausalLM": "modeling_nanochat.NanochatForCausalLM",
-            "AutoTokenizer": ["tokenization_nanochat.NanochatTokenizer", None],
+            "AutoTokenizer": "tokenization_nanochat.NanochatTokenizer",
         },
         "vocab_size": int(model_cfg["vocab_size"]),
         "padded_vocab_size": int(model_cfg["padded_vocab_size"]),
@@ -571,7 +571,7 @@ def main() -> None:
     tokenizer_config = {
         "tokenizer_class": "NanochatTokenizer",
         "auto_map": {
-            "AutoTokenizer": ["tokenization_nanochat.NanochatTokenizer", None],
+            "AutoTokenizer": "tokenization_nanochat.NanochatTokenizer",
         },
         "tokenizer_file": "tokenizer.pkl",
         "bos_token": "<|bos|>",
