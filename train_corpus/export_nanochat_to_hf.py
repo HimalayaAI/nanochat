@@ -219,13 +219,15 @@ MODELING_PY = dedent(
 
         def _refresh_rotary(self):
             head_dim = self.config.n_embd // self.config.n_head
-            device = self.transformer.wte.weight.device
+            weight = self.transformer.wte.weight
+            device = weight.device
+            dtype = weight.dtype
             t = torch.arange(self.rotary_seq_len, dtype=torch.float32, device=device)
             ch = torch.arange(0, head_dim, 2, dtype=torch.float32, device=device)
             inv = 1.0 / (100000 ** (ch / head_dim))
             freqs = torch.outer(t, inv)
-            cos = freqs.cos()[None, :, None, :]
-            sin = freqs.sin()[None, :, None, :]
+            cos = freqs.cos()[None, :, None, :].to(dtype=dtype)
+            sin = freqs.sin()[None, :, None, :].to(dtype=dtype)
             self.cos = cos
             self.sin = sin
 
@@ -243,7 +245,7 @@ MODELING_PY = dedent(
 
         def forward(self, input_ids):
             bsz, seqlen = input_ids.shape
-            if self.cos.device != input_ids.device:
+            if self.cos.device != input_ids.device or self.cos.dtype != self.transformer.wte.weight.dtype:
                 self._refresh_rotary()
             cos_sin = self.cos[:, :seqlen], self.sin[:, :seqlen]
 
@@ -274,6 +276,7 @@ MODELING_PY = dedent(
 
     class NanochatForCausalLM(PreTrainedModel):
         config_class = NanochatConfig
+        base_model_prefix = "model"
         main_input_name = "input_ids"
 
         def __init__(self, config):
@@ -339,9 +342,12 @@ TOKENIZER_PY = dedent(
 
 
     class NanochatTokenizer(PreTrainedTokenizer):
+        vocab_files_names = {"tokenizer_file": "tokenizer.pkl"}
         model_input_names = ["input_ids", "attention_mask"]
 
-        def __init__(self, tokenizer_file="tokenizer.pkl", **kwargs):
+        def __init__(self, tokenizer_file=None, **kwargs):
+            if tokenizer_file is None:
+                tokenizer_file = self.vocab_files_names["tokenizer_file"]
             self.tokenizer_file = tokenizer_file
             with open(tokenizer_file, "rb") as f:
                 self._enc = pickle.load(f)
@@ -508,7 +514,8 @@ def main() -> None:
         step=args.step,
     )
 
-    state_dict = {k: v.detach().cpu().contiguous() for k, v in model.state_dict().items()}
+    # HF wrapper class stores the nanochat backbone under `self.model`, so prefix keys accordingly.
+    state_dict = {f"model.{k}": v.detach().cpu().contiguous() for k, v in model.state_dict().items()}
     save_file(state_dict, str(out_dir / "model.safetensors"))
 
     model_cfg = dict(meta["model_config"])
@@ -566,6 +573,7 @@ def main() -> None:
         "auto_map": {
             "AutoTokenizer": ["tokenization_nanochat.NanochatTokenizer", None],
         },
+        "tokenizer_file": "tokenizer.pkl",
         "bos_token": "<|bos|>",
         "eos_token": "<|bos|>",
         "pad_token": "<|bos|>",
