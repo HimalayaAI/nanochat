@@ -135,9 +135,12 @@ def read_stream_row(
     ds_id: str,
     cfg_name: Optional[str],
     split: str,
+    data_files: Any,
     timeout_seconds: int,
 ) -> Dict[str, Any]:
     load_kwargs = {"split": split, "streaming": True}
+    if data_files is not None:
+        load_kwargs["data_files"] = data_files
     with time_limit(timeout_seconds):
         if cfg_name:
             ds = load_dataset(ds_id, name=cfg_name, **load_kwargs)
@@ -175,12 +178,14 @@ def main() -> None:
             continue
         cfg_name = src.get("config")
         split = str(src.get("split", "train"))
+        data_files = src.get("data_files")
         print(f"\n[{idx}/{len(sources)}] {ds_id} cfg={cfg_name or '-'} split={split}")
 
         item: Dict[str, Any] = {
             "id": ds_id,
             "config": cfg_name,
             "split": split,
+            "data_files": data_files,
             "in_eval_ids": ds_id in eval_ids,
         }
 
@@ -219,7 +224,7 @@ def main() -> None:
             print(f"  split_list_error={item['split_list_error']}")
 
         try:
-            row = read_stream_row(ds_id, cfg_name, split, args.timeout_seconds)
+            row = read_stream_row(ds_id, cfg_name, split, data_files, args.timeout_seconds)
             keys = list(row.keys())
             key_types = {k: describe_value_type(v) for k, v in row.items()}
             item["stream_keys"] = keys

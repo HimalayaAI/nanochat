@@ -437,6 +437,20 @@ def row_to_sharegpt(row: Dict[str, Any], src_cfg: Dict[str, Any]) -> Optional[Li
     raise ValueError(f"Unknown adapter: {adapter}")
 
 
+def build_source_key(src_cfg: Dict[str, Any]) -> str:
+    src_id = str(src_cfg.get("id", "<unknown>"))
+    cfg_name = src_cfg.get("config")
+    split = str(src_cfg.get("split", "train"))
+    data_files = src_cfg.get("data_files")
+    if data_files:
+        if isinstance(data_files, str):
+            data_files_desc = data_files
+        else:
+            data_files_desc = json.dumps(data_files, ensure_ascii=False, sort_keys=True)
+        return f"{src_id}:{cfg_name or 'default'}:{split}:data_files={data_files_desc}"
+    return f"{src_id}:{cfg_name or 'default'}:{split}"
+
+
 def iter_dataset_rows(src_cfg: Dict[str, Any], seed: int) -> Iterable[Dict[str, Any]]:
     repo_id = src_cfg["id"]
     split = src_cfg.get("split", "train")
@@ -445,6 +459,12 @@ def iter_dataset_rows(src_cfg: Dict[str, Any], seed: int) -> Iterable[Dict[str, 
     shuffle_buffer = int(src_cfg.get("shuffle_buffer", 0))
 
     load_kwargs = {"split": split, "streaming": streaming}
+    if src_cfg.get("data_files") is not None:
+        load_kwargs["data_files"] = src_cfg.get("data_files")
+    if src_cfg.get("data_dir") is not None:
+        load_kwargs["data_dir"] = src_cfg.get("data_dir")
+    if src_cfg.get("revision") is not None:
+        load_kwargs["revision"] = src_cfg.get("revision")
     if cfg_name:
         ds = load_dataset(repo_id, name=cfg_name, **load_kwargs)
     else:
@@ -517,13 +537,14 @@ def main() -> None:
             if "id" not in src_cfg:
                 raise KeyError(f"Source index {src_idx} missing required key: id")
             src_id = src_cfg["id"]
+            src_key = build_source_key(src_cfg)
             max_conversations = (
                 int(args.max_conversations_per_source)
                 if args.max_conversations_per_source > 0
                 else int(src_cfg.get("max_conversations", 0))
             )
             src_stats = SourceStats()
-            print(f"[{src_idx + 1}/{len(sources)}] Processing {src_id} ...")
+            print(f"[{src_idx + 1}/{len(sources)}] Processing {src_key} ...")
 
             for row in iter_dataset_rows(src_cfg, seed=args.seed):
                 if max_conversations > 0 and src_stats.rows_kept >= max_conversations:
@@ -566,7 +587,11 @@ def main() -> None:
                 src_stats.approx_total_messages += len(custom_conv)
                 src_stats.approx_total_chars += sum(len(m["content"]) for m in custom_conv)
 
-            global_stats["sources"][src_id] = {
+            global_stats["sources"][src_key] = {
+                "id": src_id,
+                "config": src_cfg.get("config"),
+                "split": src_cfg.get("split", "train"),
+                "data_files": src_cfg.get("data_files"),
                 "rows_seen": src_stats.rows_seen,
                 "rows_kept": src_stats.rows_kept,
                 "rows_dropped": src_stats.rows_dropped,
