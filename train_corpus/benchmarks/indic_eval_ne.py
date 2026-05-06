@@ -317,13 +317,15 @@ def run_nanochat_eval(args: argparse.Namespace, prompt_style: str, rows: List[Di
             seed=args.seed + idx,
         )
         completion_ids = generated_batch[0][len(prompt_tokens) :]
-        prediction = strip_special_markers(tokenizer.decode(completion_ids))
+        prediction_raw = tokenizer.decode(completion_ids)
+        prediction = strip_special_markers(prediction_raw)
         outputs.append(
             {
                 "row_index": idx,
                 "id": row.get("id"),
                 "prompt": prompt,
                 "target": target,
+                "prediction_raw": prediction_raw,
                 "prediction": prediction,
             }
         )
@@ -424,13 +426,15 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
             out = model.generate(input_ids=input_ids, **gen_kwargs)
 
         completion_ids = out[0, input_ids.shape[1] :]
-        prediction = strip_special_markers(tokenizer.decode(completion_ids, skip_special_tokens=False))
+        prediction_raw = tokenizer.decode(completion_ids, skip_special_tokens=False)
+        prediction = strip_special_markers(prediction_raw)
         outputs.append(
             {
                 "row_index": idx,
                 "id": row.get("id"),
                 "prompt": prompt,
                 "target": target,
+                "prediction_raw": prediction_raw,
                 "prediction": prediction,
             }
         )
