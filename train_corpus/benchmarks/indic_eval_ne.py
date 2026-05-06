@@ -86,6 +86,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-p", type=float, default=1.0, help="Top-p sampling (HF backend)")
     parser.add_argument("--top-k", type=int, default=0, help="Top-k sampling (nanochat backend, 0 disables)")
     parser.add_argument("--seed", type=int, default=42, help="Seed")
+    parser.add_argument(
+        "--context-window",
+        type=int,
+        default=0,
+        help="Override max context window for HF generation (0 = auto-detect from config/tokenizer).",
+    )
+    parser.add_argument(
+        "--no-truncate-context",
+        action="store_true",
+        help="Disable prompt truncation for overlong HF prompts (will error if prompt exceeds context window).",
+    )
 
     # output
     parser.add_argument(
@@ -166,6 +177,27 @@ def choose_device(args: argparse.Namespace):
             return torch.device("mps")
         return torch.device("cpu")
     return torch.device(args.device_type)
+
+
+def infer_hf_context_window(args: argparse.Namespace, model, tokenizer) -> int:
+    if args.context_window and args.context_window > 0:
+        return int(args.context_window)
+
+    candidates: List[int] = []
+    cfg = getattr(model, "config", None)
+    if cfg is not None:
+        for key in ("sequence_len", "max_position_embeddings", "n_positions", "max_seq_len"):
+            val = getattr(cfg, key, None)
+            if isinstance(val, int) and 0 < val < 1_000_000:
+                candidates.append(int(val))
+
+    tok_max = getattr(tokenizer, "model_max_length", None)
+    if isinstance(tok_max, int) and 0 < tok_max < 1_000_000:
+        candidates.append(int(tok_max))
+
+    if not candidates:
+        return 2048
+    return min(candidates)
 
 
 def build_nanochat_prompt_tokens(tokenizer, prompt: str, prompt_style: str) -> List[int]:
@@ -332,17 +364,49 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
         model.to(device)
     model.eval()
 
+    context_window = infer_hf_context_window(args, model, tokenizer)
+    max_prompt_tokens = context_window - args.max_new_tokens
+    if max_prompt_tokens < 1:
+        raise ValueError(
+            f"max_new_tokens ({args.max_new_tokens}) must be smaller than context window ({context_window}). "
+            "Reduce --max-new-tokens or set a larger --context-window override."
+        )
+
+    vocab_size = int(getattr(model.config, "vocab_size", len(tokenizer)))
+    truncate_context = not args.no_truncate_context
+
     print(f"Loaded HF model: {args.hf_model}@{args.hf_revision}")
     print(f"Prompt style: {prompt_style}")
+    print(f"HF context window: {context_window} | max prompt tokens (after reserve): {max_prompt_tokens}")
 
     do_sample = args.temperature > 0.0
     outputs: List[Dict[str, Any]] = []
+    truncated_count = 0
+    invalid_id_rows = 0
 
     for idx, row in enumerate(rows):
         prompt = str(row[args.prompt_field])
         target = str(row[args.target_field])
 
         prompt_ids = build_hf_prompt_ids(tokenizer, prompt, prompt_style)
+        if len(prompt_ids) > max_prompt_tokens:
+            if not truncate_context:
+                raise ValueError(
+                    f"Row {idx} prompt token length {len(prompt_ids)} exceeds max allowed {max_prompt_tokens}. "
+                    "Re-run with smaller --max-new-tokens, larger --context-window, or remove --no-truncate-context."
+                )
+            # Keep the prompt prefix (instruction + leading context) and reserve space for generation.
+            prompt_ids = prompt_ids[:max_prompt_tokens]
+            truncated_count += 1
+
+        if prompt_ids:
+            min_id = min(prompt_ids)
+            max_id = max(prompt_ids)
+            if min_id < 0 or max_id >= vocab_size:
+                invalid_id_rows += 1
+                # Defensive clamp: avoid device-side assert from invalid embedding indices.
+                prompt_ids = [min(max(int(tid), 0), vocab_size - 1) for tid in prompt_ids]
+
         input_ids = torch.tensor([prompt_ids], dtype=torch.long)
         if device.type in {"cuda", "mps"}:
             input_ids = input_ids.to(model.device)
@@ -373,6 +437,11 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
 
         if (idx + 1) % 20 == 0 or (idx + 1) == len(rows):
             print(f"Progress: {idx + 1}/{len(rows)}")
+
+    if truncated_count:
+        print(f"Truncated overlong prompts: {truncated_count}/{len(rows)}")
+    if invalid_id_rows:
+        print(f"Rows with out-of-range token ids (clamped defensively): {invalid_id_rows}/{len(rows)}")
 
     model_info = {
         "backend": "hf",

@@ -25,6 +25,19 @@ DEFAULT_PROMPTS = [
 ]
 
 
+SPECIAL_TOKENS = [
+    "<|bos|>",
+    "<|user_start|>",
+    "<|user_end|>",
+    "<|assistant_start|>",
+    "<|assistant_end|>",
+    "<|python_start|>",
+    "<|python_end|>",
+    "<|output_start|>",
+    "<|output_end|>",
+]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Smoke test HF-exported nanochat model on several prompts")
     group = parser.add_mutually_exclusive_group(required=True)
@@ -39,7 +52,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-p", type=float, default=0.95, help="Top-p sampling")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--device-type", choices=["auto", "cpu", "cuda"], default="auto")
+    parser.add_argument("--prompt-style", choices=["auto", "plain", "chat"], default="auto", help="Prompt formatting style")
     parser.add_argument("--expect-min-new-tokens", type=int, default=1, help="Fail prompt if fewer tokens are generated")
+    parser.add_argument(
+        "--expect-min-response-chars",
+        type=int,
+        default=1,
+        help="Fail prompt if cleaned completion has fewer visible characters",
+    )
     parser.add_argument("--output-json", default=None, help="Optional output JSON path")
     return parser.parse_args()
 
@@ -98,6 +118,64 @@ def choose_input_device(model) -> Any:
     return next(model.parameters()).device
 
 
+def strip_special_markers(text: str) -> str:
+    out = text
+    for tok in SPECIAL_TOKENS:
+        out = out.replace(tok, "")
+    return out.strip()
+
+
+def _hf_special_id(tokenizer, token: str) -> int | None:
+    token_id = tokenizer.convert_tokens_to_ids(token)
+    if token_id is None:
+        return None
+    if token_id == tokenizer.unk_token_id and token != tokenizer.unk_token:
+        return None
+    return int(token_id)
+
+
+def resolve_prompt_style(prompt_style: str, tokenizer) -> str:
+    if prompt_style != "auto":
+        return prompt_style
+    needed = ["<|user_start|>", "<|user_end|>", "<|assistant_start|>"]
+    if all(_hf_special_id(tokenizer, t) is not None for t in needed):
+        return "chat"
+    return "plain"
+
+
+def build_prompt_ids(tokenizer, prompt: str, prompt_style: str) -> List[int]:
+    if prompt_style == "plain":
+        return tokenizer(prompt, add_special_tokens=False)["input_ids"]
+
+    if prompt_style == "chat":
+        bos = tokenizer.bos_token_id
+        if bos is None:
+            bos = _hf_special_id(tokenizer, "<|bos|>")
+        user_start = _hf_special_id(tokenizer, "<|user_start|>")
+        user_end = _hf_special_id(tokenizer, "<|user_end|>")
+        assistant_start = _hf_special_id(tokenizer, "<|assistant_start|>")
+        missing = [
+            name
+            for name, val in [
+                ("<|bos|>", bos),
+                ("<|user_start|>", user_start),
+                ("<|user_end|>", user_end),
+                ("<|assistant_start|>", assistant_start),
+            ]
+            if val is None
+        ]
+        if missing:
+            raise ValueError(
+                "Chat prompt style requested, but tokenizer is missing special tokens: " + ", ".join(missing)
+            )
+        ids = [int(bos), int(user_start)]
+        ids.extend(tokenizer(prompt, add_special_tokens=False)["input_ids"])
+        ids.extend([int(user_end), int(assistant_start)])
+        return ids
+
+    raise ValueError(f"Unknown prompt style: {prompt_style}")
+
+
 def main() -> None:
     args = parse_args()
 
@@ -124,6 +202,7 @@ def main() -> None:
         trust_remote_code=True,
         revision=args.revision,
     )
+    prompt_style = resolve_prompt_style(args.prompt_style, tok)
     model = AutoModelForCausalLM.from_pretrained(
         target,
         trust_remote_code=True,
@@ -134,15 +213,17 @@ def main() -> None:
 
     device = choose_input_device(model)
     print(f"Loaded model on device: {device}")
+    print(f"Prompt style: {prompt_style}")
     print(f"Running {len(prompts)} prompt(s)")
 
     results: List[Dict[str, Any]] = []
     failures = 0
 
     for i, prompt in enumerate(prompts, start=1):
-        inputs = tok(prompt, return_tensors="pt")
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-        prompt_len = int(inputs["input_ids"].shape[-1])
+        prompt_ids = build_prompt_ids(tok, prompt, prompt_style)
+        input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=device)
+        prompt_len = int(input_ids.shape[-1])
+        inputs = {"input_ids": input_ids}
 
         with torch.no_grad():
             out = model.generate(
@@ -151,12 +232,16 @@ def main() -> None:
                 do_sample=True,
                 temperature=args.temperature,
                 top_p=args.top_p,
+                pad_token_id=tok.eos_token_id,
             )
 
         gen_ids = out[0]
-        full_text = tok.decode(gen_ids, skip_special_tokens=True)
+        full_text = tok.decode(gen_ids, skip_special_tokens=False)
+        completion_ids = gen_ids[prompt_len:]
+        completion_raw = tok.decode(completion_ids, skip_special_tokens=False)
+        completion_text = strip_special_markers(completion_raw)
         new_tokens = int(gen_ids.shape[-1] - prompt_len)
-        passed = new_tokens >= args.expect_min_new_tokens
+        passed = (new_tokens >= args.expect_min_new_tokens) and (len(completion_text) >= args.expect_min_response_chars)
         if not passed:
             failures += 1
 
@@ -166,14 +251,16 @@ def main() -> None:
                 "prompt": prompt,
                 "new_tokens": new_tokens,
                 "passed": passed,
-                "output": full_text,
+                "output_full": full_text,
+                "completion_raw": completion_raw,
+                "completion_text": completion_text,
             }
         )
 
         status = "PASS" if passed else "FAIL"
         print(f"\n[{status}] Prompt {i}/{len(prompts)} | new_tokens={new_tokens}")
         print(f"Prompt: {prompt}")
-        print(f"Output: {full_text}")
+        print(f"Completion: {completion_text if completion_text else '<empty>'}")
 
     passed_count = len(prompts) - failures
     print(f"\nSummary: {passed_count}/{len(prompts)} prompts passed")
@@ -185,10 +272,12 @@ def main() -> None:
             "target": target,
             "revision": args.revision,
             "device_type": args.device_type,
+            "prompt_style": prompt_style,
             "max_new_tokens": args.max_new_tokens,
             "temperature": args.temperature,
             "top_p": args.top_p,
             "expect_min_new_tokens": args.expect_min_new_tokens,
+            "expect_min_response_chars": args.expect_min_response_chars,
             "results": results,
             "passed": failures == 0,
         }
