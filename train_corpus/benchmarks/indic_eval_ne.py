@@ -219,6 +219,15 @@ def build_nanochat_prompt_tokens(tokenizer, prompt: str, prompt_style: str) -> L
 
 
 def _hf_special_id(tokenizer, token: str) -> int | None:
+    # Prefer tokenizer's native special-id table when available. Some custom
+    # tokenizers can report remapped ids via convert_tokens_to_ids() if the
+    # special token is re-added on load.
+    special_map = getattr(tokenizer, "_special_to_id", None)
+    if isinstance(special_map, dict) and token in special_map:
+        token_id = int(special_map[token])
+        if token_id >= 0:
+            return token_id
+
     token_id = tokenizer.convert_tokens_to_ids(token)
     if token_id is None:
         return None

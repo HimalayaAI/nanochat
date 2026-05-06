@@ -429,7 +429,12 @@ TOKENIZER_PY = dedent(
             return int(self._enc.n_vocab)
 
         def get_vocab(self) -> Dict[str, int]:
-            return {str(i): i for i in range(self.vocab_size)}
+            vocab = {str(i): i for i in range(self.vocab_size)}
+            for token, token_id in self._special_to_id.items():
+                tid = int(token_id)
+                if 0 <= tid < self.vocab_size:
+                    vocab[token] = tid
+            return vocab
 
         def _tokenize(self, text: str, **kwargs) -> List[str]:
             return [str(i) for i in self._enc.encode_ordinary(text)]
@@ -437,7 +442,13 @@ TOKENIZER_PY = dedent(
         def _convert_token_to_id(self, token: str) -> int:
             if token in self._special_to_id:
                 return int(self._special_to_id[token])
-            return int(token)
+            try:
+                return int(token)
+            except ValueError:
+                if self.unk_token_id is not None:
+                    return int(self.unk_token_id)
+                # Fallback to BOS so conversion never yields out-of-range IDs.
+                return int(self._special_to_id.get("<|bos|>", 0))
 
         def _convert_id_to_token(self, index: int) -> str:
             if index in self._id_to_special:
