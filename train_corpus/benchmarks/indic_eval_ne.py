@@ -421,6 +421,7 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
         input_ids = torch.tensor([prompt_ids], dtype=torch.long)
         if device.type in {"cuda", "mps"}:
             input_ids = input_ids.to(model.device)
+        attention_mask = torch.ones_like(input_ids)
 
         gen_kwargs = {
             "max_new_tokens": args.max_new_tokens,
@@ -432,7 +433,7 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
         gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
 
         with torch.no_grad():
-            out = model.generate(input_ids=input_ids, **gen_kwargs)
+            out = model.generate(input_ids=input_ids, attention_mask=attention_mask, **gen_kwargs)
 
         completion_ids = out[0, input_ids.shape[1] :]
         prediction_raw = tokenizer.decode(completion_ids, skip_special_tokens=False)

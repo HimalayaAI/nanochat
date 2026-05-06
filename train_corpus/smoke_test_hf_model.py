@@ -287,8 +287,9 @@ def main() -> None:
                 prompt_ids = [min(max(int(tid), 0), embedding_vocab_size - 1) for tid in prompt_ids]
 
         input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=device)
+        attention_mask = torch.ones_like(input_ids)
         prompt_len = int(input_ids.shape[-1])
-        inputs = {"input_ids": input_ids}
+        inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
 
         do_sample = args.temperature > 0.0
         gen_kwargs: Dict[str, Any] = {
