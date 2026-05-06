@@ -48,8 +48,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prompts-file", default=None, help="Optional .txt/.json/.jsonl prompts file")
     parser.add_argument("--num-prompts", type=int, default=0, help="Limit number of prompts (0 = all)")
     parser.add_argument("--max-new-tokens", type=int, default=64, help="Max generated tokens per prompt")
-    parser.add_argument("--temperature", type=float, default=0.8, help="Sampling temperature")
-    parser.add_argument("--top-p", type=float, default=0.95, help="Top-p sampling")
+    parser.add_argument("--temperature", type=float, default=0.8, help="Sampling temperature (<=0 uses greedy decoding)")
+    parser.add_argument("--top-p", type=float, default=0.95, help="Top-p sampling (only when temperature > 0)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--device-type", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument("--prompt-style", choices=["auto", "plain", "chat"], default="auto", help="Prompt formatting style")
@@ -290,15 +290,18 @@ def main() -> None:
         prompt_len = int(input_ids.shape[-1])
         inputs = {"input_ids": input_ids}
 
+        do_sample = args.temperature > 0.0
+        gen_kwargs: Dict[str, Any] = {
+            "max_new_tokens": args.max_new_tokens,
+            "do_sample": do_sample,
+            "pad_token_id": tok.eos_token_id,
+        }
+        if do_sample:
+            gen_kwargs["temperature"] = args.temperature
+            gen_kwargs["top_p"] = args.top_p
+
         with torch.no_grad():
-            out = model.generate(
-                **inputs,
-                max_new_tokens=args.max_new_tokens,
-                do_sample=True,
-                temperature=args.temperature,
-                top_p=args.top_p,
-                pad_token_id=tok.eos_token_id,
-            )
+            out = model.generate(**inputs, **gen_kwargs)
 
         gen_ids = out[0]
         full_text = tok.decode(gen_ids, skip_special_tokens=False)
@@ -339,6 +342,7 @@ def main() -> None:
             "device_type": args.device_type,
             "prompt_style": prompt_style,
             "max_new_tokens": args.max_new_tokens,
+            "do_sample": args.temperature > 0.0,
             "temperature": args.temperature,
             "top_p": args.top_p,
             "expect_min_new_tokens": args.expect_min_new_tokens,
