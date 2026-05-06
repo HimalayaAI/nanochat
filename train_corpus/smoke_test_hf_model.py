@@ -118,6 +118,22 @@ def choose_input_device(model) -> Any:
     return next(model.parameters()).device
 
 
+def infer_hf_context_window(model, tokenizer) -> int:
+    candidates: List[int] = []
+    cfg = getattr(model, "config", None)
+    if cfg is not None:
+        for key in ("sequence_len", "max_position_embeddings", "n_positions", "max_seq_len"):
+            val = getattr(cfg, key, None)
+            if isinstance(val, int) and 0 < val < 1_000_000:
+                candidates.append(int(val))
+    tok_max = getattr(tokenizer, "model_max_length", None)
+    if isinstance(tok_max, int) and 0 < tok_max < 1_000_000:
+        candidates.append(int(tok_max))
+    if not candidates:
+        return 2048
+    return min(candidates)
+
+
 def strip_special_markers(text: str) -> str:
     out = text
     for tok in SPECIAL_TOKENS:
@@ -141,6 +157,23 @@ def resolve_prompt_style(prompt_style: str, tokenizer) -> str:
     if all(_hf_special_id(tokenizer, t) is not None for t in needed):
         return "chat"
     return "plain"
+
+
+def maybe_fallback_chat_to_plain(prompt_style: str, tokenizer, embedding_vocab_size: int) -> str:
+    if prompt_style != "chat":
+        return prompt_style
+    for tok in ("<|bos|>", "<|user_start|>", "<|user_end|>", "<|assistant_start|>"):
+        tid = _hf_special_id(tokenizer, tok)
+        if tid is None:
+            print(f"[warn] Missing special token id for {tok}; falling back to plain prompt style.")
+            return "plain"
+        if tid < 0 or tid >= embedding_vocab_size:
+            print(
+                f"[warn] Special token {tok} has id={tid} outside embedding range [0, {embedding_vocab_size - 1}]; "
+                "falling back to plain prompt style."
+            )
+            return "plain"
+    return prompt_style
 
 
 def build_prompt_ids(tokenizer, prompt: str, prompt_style: str) -> List[int]:
@@ -211,9 +244,22 @@ def main() -> None:
     )
     model.eval()
 
+    model_cfg = getattr(model, "config", None)
+    if model_cfg is not None and getattr(model_cfg, "padded_vocab_size", None) is not None:
+        embedding_vocab_size = int(model_cfg.padded_vocab_size)
+    elif model_cfg is not None and getattr(model_cfg, "vocab_size", None) is not None:
+        embedding_vocab_size = int(model_cfg.vocab_size)
+    else:
+        embedding_vocab_size = len(tok)
+
+    prompt_style = maybe_fallback_chat_to_plain(prompt_style, tok, embedding_vocab_size)
+    context_window = infer_hf_context_window(model, tok)
+    max_prompt_tokens = max(1, context_window - int(args.max_new_tokens))
+
     device = choose_input_device(model)
     print(f"Loaded model on device: {device}")
     print(f"Prompt style: {prompt_style}")
+    print(f"Context window: {context_window} | max prompt tokens: {max_prompt_tokens}")
     print(f"Running {len(prompts)} prompt(s)")
 
     results: List[Dict[str, Any]] = []
@@ -221,6 +267,16 @@ def main() -> None:
 
     for i, prompt in enumerate(prompts, start=1):
         prompt_ids = build_prompt_ids(tok, prompt, prompt_style)
+        if len(prompt_ids) > max_prompt_tokens:
+            prompt_ids = prompt_ids[:max_prompt_tokens]
+
+        if prompt_ids:
+            min_id = min(prompt_ids)
+            max_id = max(prompt_ids)
+            if min_id < 0 or max_id >= embedding_vocab_size:
+                # Defensive clamp to avoid CUDA gather asserts on malformed ids.
+                prompt_ids = [min(max(int(tid), 0), embedding_vocab_size - 1) for tid in prompt_ids]
+
         input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=device)
         prompt_len = int(input_ids.shape[-1])
         inputs = {"input_ids": input_ids}
