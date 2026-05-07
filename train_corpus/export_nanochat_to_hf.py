@@ -582,6 +582,8 @@ README_TEMPLATE = dedent(
     ## Notes
 
     - This repo uses custom model/tokenizer code (`trust_remote_code=True`).
+    - Recommended runtime: `transformers>=4.57.1` (avoid `4.57.0`, which was yanked on PyPI).
+    - A standalone helper is included at `run_standalone_inference.py` for HF-only usage.
     - Checkpoint source: `{source}`
     - Model tag: `{model_tag}`
     - Step: `{step}`
@@ -719,6 +721,11 @@ def main() -> None:
     write_text(out_dir / "configuration_nanochat.py", CONFIG_PY)
     write_text(out_dir / "modeling_nanochat.py", MODELING_PY)
     write_text(out_dir / "tokenization_nanochat.py", TOKENIZER_PY)
+    # Ship a standalone HF-only inference helper inside the model repo.
+    # This avoids requiring the nanochat codebase for downstream users.
+    standalone_infer = Path(__file__).with_name("hf_infer_colab_ready.py")
+    if standalone_infer.exists():
+        shutil.copy2(standalone_infer, out_dir / "run_standalone_inference.py")
 
     repo_name = args.upload_repo or "local/nanochat-export"
     model_tag = args.model_tag or meta.get("model_tag", "auto")
