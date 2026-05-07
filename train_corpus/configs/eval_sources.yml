@@ -1,0 +1,56 @@
+output_dir: data/eval
+rows_per_lang: 5000
+seed: 42
+filters:
+  min_chars: 20
+  min_words: 3
+languages:
+  - lang: ne
+    sources:
+      - id: ai4bharat/sangraha
+        type: hf
+        config: verified
+        split: nep
+        field: text
+        doc_id_field: doc_id
+      - id: himalaya-ai/nepali-corpus-compile
+        type: hf
+        split: train
+        field: text
+  - lang: hi
+    sources:
+      - id: ai4bharat/sangraha
+        type: hf
+        config: verified
+        split: hin
+        field: text
+        doc_id_field: doc_id
+      - id: ai4bharat/IndicCorpV2
+        type: hf
+        config: indiccorp_v2
+        split: hin_Deva
+        field: text
+  - lang: en
+    sources:
+      - id: mlfoundations/dclm-baseline-1.0
+        type: hf
+        split: train
+        field: text
+      - id: HuggingFaceFW/fineweb-edu
+        type: hf
+        split: train
+        field: text
+  - lang: roman_ne
+    sources:
+      - id: himalaya-ai/nepali-roman-pretrain
+        type: hf
+        split: train
+        field: text
+  - lang: roman_hi
+    sources:
+      - id: ai4bharat/sangraha
+        type: hf
+        config: synthetic
+        split: hin_Latn
+        field: text
+        doc_id_field: doc_id

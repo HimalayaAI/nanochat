@@ -1,0 +1,185 @@
+target_tokens: 50000000000
+output_path: data/tokenizer_corpus.jsonl
+stats_path: data/tokenizer_corpus.stats.json
+token_estimator: tiktoken
+
+# Default quality filters (can be overridden per source)
+filters:
+  min_chars: 20
+  min_words: 3
+  min_devanagari_ratio: 0.3
+  short_text:
+    max_chars: 80
+    min_words: 6
+    require_sentence_punct: true
+  max_digit_ratio: 0.4
+  max_symbol_ratio: 0.4
+  max_repeated_char_ratio: 0.3
+
+sources:
+# Nepali (Devanagari)
+  - id: himalaya-ai/nepali-corpus-compile
+    type: hf
+    split: train
+    field: text
+    lang: ne
+    stratify_by: source
+
+  - id: himalaya-ai/nepali-pretrain-corpus
+    type: hf
+    split: train
+    field: text
+    lang: ne
+    stratify_by: source
+
+  - id: ai4bharat/sangraha
+    type: hf
+    config: verified
+    split: nep
+    field: text
+    doc_id_field: doc_id
+    lang: ne
+
+  # Devanagari (multi-language)
+  - id: himalaya-ai/devanagari_pretrain
+    type: hf
+    split: train
+    field: text
+    lang: deva_mix
+    stratify_by: source
+
+  # Hindi (AI4Bharat + FineWeb + OSCAR)
+  - id: ai4bharat/sangraha
+    type: hf
+    config: verified
+    split: hin
+    field: text
+    doc_id_field: doc_id
+    lang: hi
+
+  - id: ai4bharat/IndicCorpV2
+    type: hf
+    config: indiccorp_v2
+    split: hin_Deva
+    field: text
+    lang: hi
+    filters:
+      min_devanagari_ratio: 0.3
+    text_encoding_errors: ignore
+
+  - id: uvaidya/hindi-fineweb2-40b
+    type: hf
+    split: train
+    field: text
+    lang: hi
+    data_files: fineweb2_hindi.jsonl
+    filters:
+      min_devanagari_ratio: 0.0
+
+  - id: zicsx/OSCAR-2301-Hindi
+    type: hf
+    split: train
+    field: text
+    lang: hi
+    columns: [text]
+    filters:
+      min_devanagari_ratio: 0.3
+
+  # English
+  - id: HuggingFaceFW/fineweb-edu
+    type: hf
+    split: train
+    field: text
+    lang: en
+    filters:
+      min_devanagari_ratio: 0.0
+
+  - id: mlfoundations/dclm-baseline-1.0
+    type: hf
+    split: train
+    field: text
+    lang: en
+    filters:
+      min_devanagari_ratio: 0.0
+
+  # Code + Math
+  - id: OpenCoder-LLM/opc-fineweb-code-corpus
+    type: hf
+    split: train
+    field: text
+    lang: code
+    stratify_by: dump
+    filters:
+      min_devanagari_ratio: 0.0
+      min_words: 0
+      short_text: null
+
+  - id: ronantakizawa/github-top-code
+    type: hf
+    split: train
+    field: content
+    lang: code
+    stratify_by: file_language
+    auto_discover:
+      warmup_rows: 50000
+      max_categories: 10
+      min_fraction: 0.01
+      include_other: true
+    filters:
+      min_devanagari_ratio: 0.0
+      min_words: 0
+      short_text: null
+
+  - id: OpenCoder-LLM/opc-fineweb-math-corpus
+    type: hf
+    split: train
+    field: text
+    lang: math
+    stratify_by: dump
+    filters:
+      min_devanagari_ratio: 0.0
+      min_words: 0
+      short_text: null
+
+  - id: HuggingFaceTB/finemath
+    type: hf
+    config: finemath-3plus
+    split: train
+    field: text
+    lang: math
+    stratify_by: crawl
+    filters:
+      min_devanagari_ratio: 0.0
+      min_words: 0
+      short_text: null
+
+  # Romanized Nepali
+  - id: himalaya-ai/nepali-roman-pretrain
+    type: hf
+    split: train
+    field: text
+    lang: npi_Lat
+    stratify_by: source
+    filters:
+      min_devanagari_ratio: 0.0
+
+  # Indic Latin (mixed)
+  - id: himalaya-ai/indic_latn_pretrain
+    type: hf
+    split: train
+    field: text
+    lang: indic_Latn
+    stratify_by: source
+    filters:
+      min_devanagari_ratio: 0.0
+
+  # Hindi Latn (small slice)
+  - id: ai4bharat/sangraha
+    type: hf
+    config: synthetic
+    split: hin_Latn
+    field: text
+    doc_id_field: doc_id
+    lang: hin_Latn
+    filters:
+      min_devanagari_ratio: 0.0

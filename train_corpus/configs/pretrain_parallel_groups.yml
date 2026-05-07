@@ -1,0 +1,50 @@
+- name: harl_ne_deva
+  weight: 0.70
+  equal_split: true
+  sources:
+    - himalaya-ai/nepali-corpus-compile
+    - himalaya-ai/nepali-pretrain-corpus
+    - himalaya-ai/devanagari_pretrain
+    - himalaya-ai/sangraha_nepali
+    - himalaya-ai/wikipedia_nepali_deva
+    - himalaya-ai/nepali-news-corpus
+    - himalaya-ai/cc100-nepali
+    - himalaya-ai/nepali_pdf_corpus
+  shard_prefix: pretrain_harl_ne_deva
+  log: data/pretrain_harl_ne_deva.log
+
+- name: harl_latin
+  weight: 0.10
+  equal_split: true
+  sources:
+    - himalaya-ai/nepali-roman-pretrain
+    - himalaya-ai/indic_latn_pretrain
+  shard_prefix: pretrain_harl_latin
+  log: data/pretrain_harl_latin.log
+
+- name: en_cap
+  weight: 0.12
+  equal_split: true
+  sources:
+    - HuggingFaceFW/fineweb-edu
+    - mlfoundations/dclm-baseline-1.0
+  shard_prefix: pretrain_en
+  log: data/pretrain_en.log
+
+- name: code_cap
+  weight: 0.05
+  equal_split: true
+  sources:
+    - OpenCoder-LLM/opc-fineweb-code-corpus
+    - ronantakizawa/github-top-code
+  shard_prefix: pretrain_code
+  log: data/pretrain_code.log
+
+- name: math_cap
+  weight: 0.03
+  equal_split: true
+  sources:
+    - OpenCoder-LLM/opc-fineweb-math-corpus
+    - HuggingFaceTB/finemath:finemath-3plus:train
+  shard_prefix: pretrain_math
+  log: data/pretrain_math.log

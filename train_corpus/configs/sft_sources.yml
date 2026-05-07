@@ -1,0 +1,61 @@
+sources:
+  # Your Nepali supervised chat data (highest priority).
+  - id: himalaya-ai/nepali-sft-dataset
+    adapter: sharegpt_conversations
+    conversation_field: conversations
+    split: train
+    streaming: true
+    shuffle_buffer: 50000
+    max_conversations: 400000
+
+  # Broad multilingual/Indic SFT corpus.
+  - id: soketlabs/bhasha-sft
+    config: indic
+    adapter: auto
+    split: train
+    streaming: true
+    shuffle_buffer: 50000
+    max_conversations: 150000
+
+  # Large, diverse instruction/chat corpus.
+  - id: teknium/OpenHermes-2.5
+    adapter: sharegpt_conversations
+    conversation_field: conversations
+    split: train
+    streaming: true
+    shuffle_buffer: 50000
+    max_conversations: 120000
+
+  # Orca-style instruction responses.
+  - id: Open-Orca/OpenOrca
+    adapter: openorca
+    split: train
+    streaming: true
+    shuffle_buffer: 50000
+    max_conversations: 120000
+
+  # Classic instruction-following seed set.
+  - id: tatsu-lab/alpaca
+    adapter: alpaca
+    split: train
+    streaming: true
+    shuffle_buffer: 0
+    max_conversations: 52000
+
+  # Math-focused SFT data.
+  - id: nvidia/Nemotron-SFT-Math-v3
+    adapter: auto
+    split: train
+    streaming: true
+    shuffle_buffer: 50000
+    max_conversations: 100000
+
+  # Tool/function-calling samples.
+  - id: NousResearch/hermes-function-calling-v1
+    config: func_calling
+    adapter: sharegpt_conversations
+    conversation_field: conversations
+    split: train
+    streaming: true
+    shuffle_buffer: 0
+    max_conversations: 20000

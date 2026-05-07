@@ -1,0 +1,160 @@
+target_tokens: 10000000000
+output_path: data/pretrain_corpus.jsonl
+stats_path: data/pretrain_corpus.stats.json
+token_estimator: tiktoken
+
+# Default quality filters (can be overridden per source)
+filters:
+  min_chars: 20
+  min_words: 3
+  min_devanagari_ratio: 0.0
+  short_text:
+    max_chars: 80
+    min_words: 6
+    require_sentence_punct: true
+  max_digit_ratio: 0.5
+  max_symbol_ratio: 0.5
+  max_repeated_char_ratio: 0.35
+
+sources:
+  # ---------------------------------------------------------------------------
+  # HARL pretraining corpora (include all; exclude SFT and tokenizer corpora)
+  # ---------------------------------------------------------------------------
+  - id: himalaya-ai/nepali-corpus-compile
+    type: hf
+    split: train
+    field: text
+    lang: ne
+    stratify_by: source
+
+  - id: himalaya-ai/nepali-pretrain-corpus
+    type: hf
+    split: train
+    field: text
+    lang: ne
+    stratify_by: source
+
+  - id: himalaya-ai/devanagari_pretrain
+    type: hf
+    split: train
+    field: text
+    lang: deva_mix
+    stratify_by: source
+
+  - id: himalaya-ai/sangraha_nepali
+    type: hf
+    split: train
+    field: text
+    lang: ne
+    stratify_by: source
+
+  - id: himalaya-ai/wikipedia_nepali_deva
+    type: hf
+    split: train
+    field: text
+    lang: ne
+
+  - id: himalaya-ai/nepali-news-corpus
+    type: hf
+    split: train
+    field: text
+    lang: ne
+
+  - id: himalaya-ai/cc100-nepali
+    type: hf
+    split: train
+    field: text
+    lang: ne
+
+  - id: himalaya-ai/nepali_pdf_corpus
+    type: hf
+    split: train
+    field: text
+    lang: ne
+
+  - id: himalaya-ai/nepali-roman-pretrain
+    type: hf
+    split: train
+    field: text
+    lang: npi_Latn
+    stratify_by: source
+    filters:
+      min_devanagari_ratio: 0.0
+
+  - id: himalaya-ai/indic_latn_pretrain
+    type: hf
+    split: train
+    field: text
+    lang: indic_Latn
+    stratify_by: source
+    filters:
+      min_devanagari_ratio: 0.0
+
+  # ---------------------------------------------------------------------------
+  # External caps (English, code, math)
+  # ---------------------------------------------------------------------------
+  - id: HuggingFaceFW/fineweb-edu
+    type: hf
+    split: train
+    field: text
+    lang: en
+    filters:
+      min_devanagari_ratio: 0.0
+
+  - id: mlfoundations/dclm-baseline-1.0
+    type: hf
+    split: train
+    field: text
+    lang: en
+    filters:
+      min_devanagari_ratio: 0.0
+
+  - id: OpenCoder-LLM/opc-fineweb-code-corpus
+    type: hf
+    split: train
+    field: text
+    lang: code
+    stratify_by: dump
+    filters:
+      min_devanagari_ratio: 0.0
+      min_words: 0
+      short_text: null
+
+  - id: ronantakizawa/github-top-code
+    type: hf
+    split: train
+    field: content
+    lang: code
+    stratify_by: file_language
+    auto_discover:
+      warmup_rows: 50000
+      max_categories: 12
+      min_fraction: 0.005
+      include_other: true
+    filters:
+      min_devanagari_ratio: 0.0
+      min_words: 0
+      short_text: null
+
+  - id: OpenCoder-LLM/opc-fineweb-math-corpus
+    type: hf
+    split: train
+    field: text
+    lang: math
+    stratify_by: dump
+    filters:
+      min_devanagari_ratio: 0.0
+      min_words: 0
+      short_text: null
+
+  - id: HuggingFaceTB/finemath
+    type: hf
+    config: finemath-3plus
+    split: train
+    field: text
+    lang: math
+    stratify_by: crawl
+    filters:
+      min_devanagari_ratio: 0.0
+      min_words: 0
+      short_text: null
