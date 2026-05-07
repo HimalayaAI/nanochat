@@ -9,7 +9,7 @@ come from decoding/sampling settings.
 from __future__ import annotations
 
 import argparse
-from typing import List
+from typing import Any, List
 
 
 def parse_args() -> argparse.Namespace:
@@ -20,6 +20,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--hf-model", required=True, help="HF repo id or local export directory")
     p.add_argument("--hf-revision", default="main")
     p.add_argument("--trust-remote-code", action="store_true")
+    p.add_argument("--hf-dtype", choices=["auto", "float32", "bfloat16"], default="auto")
     p.add_argument("--prompt-style", choices=["plain", "chat"], default="chat")
     p.add_argument("--prompt", default="नेपालको राजधानी के हो?")
     p.add_argument("--device-type", choices=["cuda", "cpu", "mps"], default="cuda")
@@ -92,11 +93,18 @@ def main() -> None:
         revision=args.hf_revision,
         trust_remote_code=args.trust_remote_code,
     )
+    hf_dtype: Any
+    if args.hf_dtype == "bfloat16":
+        hf_dtype = torch.bfloat16
+    elif args.hf_dtype == "float32":
+        hf_dtype = torch.float32
+    else:
+        hf_dtype = "auto"
     hf_model = AutoModelForCausalLM.from_pretrained(
         args.hf_model,
         revision=args.hf_revision,
         trust_remote_code=args.trust_remote_code,
-        torch_dtype=torch.bfloat16 if device.type == "cuda" else torch.float32,
+        torch_dtype=hf_dtype if device.type == "cuda" else torch.float32,
     )
     hf_model = hf_model.to(device)
     hf_model.eval()
@@ -136,4 +144,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

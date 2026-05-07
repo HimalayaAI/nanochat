@@ -64,6 +64,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hf-model", default=None, help="HF repo id or local folder (hf backend)")
     parser.add_argument("--hf-revision", default="main", help="HF revision")
     parser.add_argument("--trust-remote-code", action="store_true", help="Pass trust_remote_code=True for HF loads")
+    parser.add_argument(
+        "--hf-dtype",
+        choices=["auto", "float32", "bfloat16"],
+        default="auto",
+        help="HF load dtype for CUDA runs. Use `auto` first for conversion parity checks.",
+    )
 
     # dataset
     parser.add_argument("--dataset-id", default="Cognitive-Lab/Aya_Indic_Eval", help="HF dataset id")
@@ -367,9 +373,16 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
 
     model_kwargs: Dict[str, Any] = {"revision": args.hf_revision, "trust_remote_code": args.trust_remote_code}
     if device.type == "cuda":
-        model_kwargs["torch_dtype"] = torch.bfloat16
+        if args.hf_dtype == "bfloat16":
+            model_kwargs["torch_dtype"] = torch.bfloat16
+        elif args.hf_dtype == "float32":
+            model_kwargs["torch_dtype"] = torch.float32
+        else:
+            model_kwargs["torch_dtype"] = "auto"
         model_kwargs["device_map"] = "auto"
     else:
+        if args.hf_dtype == "bfloat16":
+            raise ValueError("--hf-dtype bfloat16 is only supported on CUDA devices")
         model_kwargs["torch_dtype"] = torch.float32
 
     tokenizer = AutoTokenizer.from_pretrained(
@@ -377,6 +390,7 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
         revision=args.hf_revision,
         trust_remote_code=args.trust_remote_code,
     )
+    print(f"HF load kwargs: {model_kwargs}")
     model = AutoModelForCausalLM.from_pretrained(args.hf_model, **model_kwargs)
     if device.type != "cuda":
         model.to(device)
@@ -492,6 +506,7 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
         "backend": "hf",
         "hf_model": args.hf_model,
         "hf_revision": args.hf_revision,
+        "hf_dtype": args.hf_dtype,
         "trust_remote_code": args.trust_remote_code,
         "hf_generation_mode": args.hf_generation_mode,
     }

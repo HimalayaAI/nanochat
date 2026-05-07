@@ -125,6 +125,17 @@ MODELING_PY = dedent(
         return F.rms_norm(x, (x.size(-1),))
 
 
+    def _detect_compute_dtype(device):
+        if device.type == "cuda":
+            idx = device.index
+            if idx is None:
+                idx = torch.cuda.current_device()
+            major, minor = torch.cuda.get_device_capability(idx)
+            if (major, minor) >= (8, 0):
+                return torch.bfloat16
+        return torch.float32
+
+
     class Linear(nn.Linear):
         def forward(self, x):
             return F.linear(x, self.weight.to(dtype=x.dtype))
@@ -142,6 +153,47 @@ MODELING_PY = dedent(
         return torch.cat([y1, y2], dim=-1)
 
 
+    def _sdpa_attention(q, k, v, window_size, enable_gqa):
+        # q/k/v are (B, H, T, D)
+        t_q = q.size(2)
+        t_k = k.size(2)
+        left_window = window_size[0]
+
+        # Full causal attention when the window covers full context.
+        if (left_window < 0 or left_window >= t_q) and t_q == t_k:
+            return F.scaled_dot_product_attention(q, k, v, is_causal=True, enable_gqa=enable_gqa)
+
+        # Single-token decode path.
+        if t_q == 1:
+            if left_window >= 0 and left_window < t_k:
+                start = max(0, t_k - (left_window + 1))
+                k = k[:, :, start:, :]
+                v = v[:, :, start:, :]
+            return F.scaled_dot_product_attention(q, k, v, is_causal=False, enable_gqa=enable_gqa)
+
+        # Build explicit causal (+ optional sliding-window) mask.
+        device = q.device
+        row_idx = (t_k - t_q) + torch.arange(t_q, device=device).unsqueeze(1)
+        col_idx = torch.arange(t_k, device=device).unsqueeze(0)
+        mask = col_idx <= row_idx
+        if left_window >= 0 and left_window < t_k:
+            mask = mask & ((row_idx - col_idx) <= left_window)
+
+        return F.scaled_dot_product_attention(q, k, v, attn_mask=mask, enable_gqa=enable_gqa)
+
+
+    def _flash_attn_func(q, k, v, causal=False, window_size=(-1, -1)):
+        if not causal:
+            raise NotImplementedError("Nanochat HF export currently supports only causal attention")
+        # SDPA fallback mirroring nanochat.flash_attention semantics.
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+        enable_gqa = q.size(1) != k.size(1)
+        y = _sdpa_attention(q, k, v, window_size=window_size, enable_gqa=enable_gqa)
+        return y.transpose(1, 2)
+
+
     class NanochatAttention(nn.Module):
         def __init__(self, config, layer_idx):
             super().__init__()
@@ -157,15 +209,7 @@ MODELING_PY = dedent(
             self.ve_gate_channels = 12
             self.ve_gate = Linear(self.ve_gate_channels, self.n_kv_head, bias=False) if _has_ve(layer_idx, config.n_layer) else None
 
-        def _layer_mask(self, t, left_window, device):
-            if left_window < 0 or left_window >= t:
-                return None
-            i = torch.arange(t, device=device)
-            causal = i[:, None] >= i[None, :]
-            local = (i[:, None] - i[None, :]) < left_window
-            return causal & local
-
-        def forward(self, x, ve, cos_sin, left_window):
+        def forward(self, x, ve, cos_sin, window_size):
             bsz, seqlen, _ = x.size()
             q = self.c_q(x).view(bsz, seqlen, self.n_head, self.head_dim)
             k = self.c_k(x).view(bsz, seqlen, self.n_kv_head, self.head_dim)
@@ -182,24 +226,8 @@ MODELING_PY = dedent(
             q = 1.2 * _norm(q)
             k = 1.2 * _norm(k)
 
-            q = q.transpose(1, 2)  # B,H,T,D
-            k = k.transpose(1, 2)
-            v = v.transpose(1, 2)
-            if self.n_kv_head != self.n_head:
-                rep = self.n_head // self.n_kv_head
-                k = k.repeat_interleave(rep, dim=1)
-                v = v.repeat_interleave(rep, dim=1)
-
-            attn_mask = self._layer_mask(seqlen, left_window, x.device)
-            y = F.scaled_dot_product_attention(
-                q,
-                k,
-                v,
-                attn_mask=attn_mask,
-                dropout_p=0.0,
-                is_causal=(attn_mask is None),
-            )
-            y = y.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
+            y = _flash_attn_func(q, k, v, causal=True, window_size=window_size)
+            y = y.contiguous().view(bsz, seqlen, -1)
             return self.c_proj(y)
 
 
@@ -219,8 +247,8 @@ MODELING_PY = dedent(
             self.attn = NanochatAttention(config, layer_idx)
             self.mlp = NanochatMLP(config)
 
-        def forward(self, x, ve, cos_sin, left_window):
-            x = x + self.attn(_norm(x), ve, cos_sin, left_window)
+        def forward(self, x, ve, cos_sin, window_size):
+            x = x + self.attn(_norm(x), ve, cos_sin, window_size)
             x = x + self.mlp(_norm(x))
             return x
 
@@ -256,17 +284,22 @@ MODELING_PY = dedent(
             self.register_buffer("sin", torch.empty(1), persistent=False)
             self._refresh_rotary()
 
-        def _refresh_rotary(self):
-            head_dim = self.config.n_embd // self.config.n_head
-            weight = self.transformer.wte.weight
-            device = weight.device
-            dtype = weight.dtype
-            t = torch.arange(self.rotary_seq_len, dtype=torch.float32, device=device)
-            ch = torch.arange(0, head_dim, 2, dtype=torch.float32, device=device)
-            inv = 1.0 / (100000 ** (ch / head_dim))
-            freqs = torch.outer(t, inv)
+        def _precompute_rotary_embeddings(self, seq_len, head_dim, device, dtype):
+            channel_range = torch.arange(0, head_dim, 2, dtype=torch.float32, device=device)
+            inv_freq = 1.0 / (100000 ** (channel_range / head_dim))
+            t = torch.arange(seq_len, dtype=torch.float32, device=device)
+            freqs = torch.outer(t, inv_freq)
             cos = freqs.cos()[None, :, None, :].to(dtype=dtype)
             sin = freqs.sin()[None, :, None, :].to(dtype=dtype)
+            return cos, sin
+
+        def _refresh_rotary(self, device=None, dtype=None):
+            head_dim = self.config.n_embd // self.config.n_head
+            if device is None:
+                device = self.transformer.wte.weight.device
+            if dtype is None:
+                dtype = self.transformer.wte.weight.dtype
+            cos, sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim, device=device, dtype=dtype)
             self.cos = cos
             self.sin = sin
 
@@ -284,11 +317,19 @@ MODELING_PY = dedent(
 
         def forward(self, input_ids):
             bsz, seqlen = input_ids.shape
-            if self.cos.device != input_ids.device or self.cos.dtype != self.transformer.wte.weight.dtype:
-                self._refresh_rotary()
+            compute_dtype = _detect_compute_dtype(input_ids.device)
+            if self.cos.device != input_ids.device or self.cos.dtype != compute_dtype:
+                self._refresh_rotary(device=input_ids.device, dtype=compute_dtype)
+
+            if seqlen > self.cos.size(1):
+                raise ValueError(
+                    f"Sequence length {seqlen} exceeds rotary cache length {self.cos.size(1)}. "
+                    "Re-export with larger sequence_len if needed."
+                )
             cos_sin = self.cos[:, :seqlen], self.sin[:, :seqlen]
 
             x = self.transformer["wte"](input_ids)
+            x = x.to(compute_dtype)
             x = _norm(x)
             if seqlen > 1:
                 gate = self.smear_lambda.to(x.dtype) * torch.sigmoid(self.smear_gate(x[:, 1:, :24]))
@@ -300,7 +341,7 @@ MODELING_PY = dedent(
             for i, block in enumerate(self.transformer["h"]):
                 x = self.resid_lambdas[i] * x + self.x0_lambdas[i] * x0
                 ve = self.value_embeds[str(i)](input_ids).to(x.dtype) if str(i) in self.value_embeds else None
-                x = block(x, ve, cos_sin, self.window_sizes[i][0])
+                x = block(x, ve, cos_sin, self.window_sizes[i])
                 if i == backout_layer:
                     x_backout = x
 
@@ -327,8 +368,6 @@ MODELING_PY = dedent(
         def all_tied_weights_keys(self):
             # Compatibility shim for some transformers/accelerate versions that
             # access `model.all_tied_weights_keys` during device_map inference.
-            # Newer codepaths call `.keys()` on this object, so expose a dict-like
-            # mapping regardless of the underlying list/tuple representation.
             return {k: None for k in getattr(self, "_tied_weights_keys", [])}
 
         def get_input_embeddings(self):
@@ -530,7 +569,7 @@ README_TEMPLATE = dedent(
     model = AutoModelForCausalLM.from_pretrained(
         repo,
         trust_remote_code=True,
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        torch_dtype="auto",
         device_map="auto" if torch.cuda.is_available() else None,
     )
 
@@ -627,7 +666,9 @@ def main() -> None:
         "bos_token_id": bos_id,
         "eos_token_id": bos_id,
         "pad_token_id": bos_id,
-        "torch_dtype": infer_torch_dtype(state_dict),
+        # Keep HF defaults in fp32 for numerical stability and closer parity
+        # with native nanochat inference on non-FA3 hardware.
+        "torch_dtype": "float32",
         "transformers_version": "4.57.0",
     }
     write_text(out_dir / "config.json", json.dumps(hf_config, ensure_ascii=False, indent=2) + "\n")

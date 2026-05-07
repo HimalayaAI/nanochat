@@ -53,6 +53,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=50, help="Top-k sampling (HF compat mode and generate mode)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--device-type", choices=["auto", "cpu", "cuda"], default="auto")
+    parser.add_argument(
+        "--dtype",
+        choices=["auto", "float32", "bfloat16"],
+        default="auto",
+        help="HF load dtype for CUDA runs. `auto` is safest for parity checks.",
+    )
     parser.add_argument("--prompt-style", choices=["auto", "plain", "chat"], default="auto", help="Prompt formatting style")
     parser.add_argument(
         "--generation-mode",
@@ -109,14 +115,22 @@ def load_prompts(path: str | None) -> List[str]:
     raise ValueError(f"Unsupported prompts file extension for {p}; use .txt, .json, or .jsonl")
 
 
-def model_load_kwargs(device_type: str) -> Dict[str, Any]:
+def model_load_kwargs(device_type: str, dtype: str) -> Dict[str, Any]:
     import torch
 
     use_cuda = torch.cuda.is_available() if device_type == "auto" else device_type == "cuda"
     if use_cuda and not torch.cuda.is_available():
         raise RuntimeError("CUDA requested but not available")
     if use_cuda:
-        return {"torch_dtype": torch.bfloat16, "device_map": "auto"}
+        if dtype == "bfloat16":
+            torch_dtype: Any = torch.bfloat16
+        elif dtype == "float32":
+            torch_dtype = torch.float32
+        else:
+            torch_dtype = "auto"
+        return {"torch_dtype": torch_dtype, "device_map": "auto"}
+    if dtype == "bfloat16":
+        raise ValueError("--dtype bfloat16 is only supported with CUDA devices")
     return {"torch_dtype": torch.float32}
 
 
@@ -274,12 +288,13 @@ def main() -> None:
     if not prompts:
         raise ValueError("No prompts to run")
 
-    load_kwargs = model_load_kwargs(args.device_type)
+    load_kwargs = model_load_kwargs(args.device_type, args.dtype)
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
     print(f"Loading tokenizer/model from: {target}")
+    print(f"HF load kwargs: {load_kwargs}")
     tok = AutoTokenizer.from_pretrained(
         target,
         trust_remote_code=True,
@@ -393,6 +408,7 @@ def main() -> None:
             "target": target,
             "revision": args.revision,
             "device_type": args.device_type,
+            "dtype": args.dtype,
             "prompt_style": prompt_style,
             "generation_mode": args.generation_mode,
             "max_new_tokens": args.max_new_tokens,
