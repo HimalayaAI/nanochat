@@ -84,8 +84,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-new-tokens", type=int, default=128, help="Max generated tokens")
     parser.add_argument("--temperature", type=float, default=0.0, help="Sampling temperature (0 for greedy)")
     parser.add_argument("--top-p", type=float, default=1.0, help="Top-p sampling (HF backend)")
-    parser.add_argument("--top-k", type=int, default=0, help="Top-k sampling (nanochat backend, 0 disables)")
+    parser.add_argument("--top-k", type=int, default=0, help="Top-k sampling (nanochat and HF compat mode, 0 disables)")
     parser.add_argument("--seed", type=int, default=42, help="Seed")
+    parser.add_argument(
+        "--hf-generation-mode",
+        choices=["compat", "generate"],
+        default="compat",
+        help="HF backend generation mode: `compat` matches nanochat-style sampling loop.",
+    )
     parser.add_argument(
         "--context-window",
         type=int,
@@ -353,6 +359,7 @@ def run_nanochat_eval(args: argparse.Namespace, prompt_style: str, rows: List[Di
 
 def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str, Any]], device):
     import torch
+    import torch.nn.functional as F
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     if not args.hf_model:
@@ -428,12 +435,36 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
             "do_sample": do_sample,
             "temperature": args.temperature if do_sample else None,
             "top_p": args.top_p if do_sample else None,
+            "top_k": args.top_k if do_sample and args.top_k > 0 else None,
             "pad_token_id": tokenizer.eos_token_id,
         }
         gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
 
-        with torch.no_grad():
-            out = model.generate(input_ids=input_ids, attention_mask=attention_mask, **gen_kwargs)
+        if args.hf_generation_mode == "compat":
+            ids = input_ids
+            rng = None
+            if do_sample:
+                rng = torch.Generator(device=ids.device)
+                rng.manual_seed(args.seed + idx)
+            with torch.no_grad():
+                for _ in range(args.max_new_tokens):
+                    model_out = model(input_ids=ids, attention_mask=torch.ones_like(ids), return_dict=True)
+                    logits = model_out.logits[:, -1, :]
+                    if args.top_k and args.top_k > 0:
+                        v, _ = torch.topk(logits, min(args.top_k, logits.size(-1)))
+                        logits = logits.clone()
+                        logits[logits < v[:, [-1]]] = -float("inf")
+                    if do_sample:
+                        logits = logits / args.temperature
+                        probs = F.softmax(logits, dim=-1)
+                        next_ids = torch.multinomial(probs, num_samples=1, generator=rng)
+                    else:
+                        next_ids = torch.argmax(logits, dim=-1, keepdim=True)
+                    ids = torch.cat((ids, next_ids), dim=1)
+            out = ids
+        else:
+            with torch.no_grad():
+                out = model.generate(input_ids=input_ids, attention_mask=attention_mask, **gen_kwargs)
 
         completion_ids = out[0, input_ids.shape[1] :]
         prediction_raw = tokenizer.decode(completion_ids, skip_special_tokens=False)
@@ -462,6 +493,7 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
         "hf_model": args.hf_model,
         "hf_revision": args.hf_revision,
         "trust_remote_code": args.trust_remote_code,
+        "hf_generation_mode": args.hf_generation_mode,
     }
     return outputs, model_info
 

@@ -50,9 +50,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-new-tokens", type=int, default=64, help="Max generated tokens per prompt")
     parser.add_argument("--temperature", type=float, default=0.8, help="Sampling temperature (<=0 uses greedy decoding)")
     parser.add_argument("--top-p", type=float, default=0.95, help="Top-p sampling (only when temperature > 0)")
+    parser.add_argument("--top-k", type=int, default=50, help="Top-k sampling (HF compat mode and generate mode)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--device-type", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument("--prompt-style", choices=["auto", "plain", "chat"], default="auto", help="Prompt formatting style")
+    parser.add_argument(
+        "--generation-mode",
+        choices=["compat", "generate"],
+        default="compat",
+        help="`compat` matches nanochat-style sampling loop; `generate` uses transformers.generate().",
+    )
     parser.add_argument("--expect-min-new-tokens", type=int, default=1, help="Fail prompt if fewer tokens are generated")
     parser.add_argument(
         "--expect-min-response-chars",
@@ -218,6 +225,40 @@ def build_prompt_ids(tokenizer, prompt: str, prompt_style: str) -> List[int]:
     raise ValueError(f"Unknown prompt style: {prompt_style}")
 
 
+def generate_hf_compat(
+    model,
+    input_ids,
+    max_new_tokens: int,
+    temperature: float,
+    top_k: int,
+    seed: int,
+):
+    import torch
+    import torch.nn.functional as F
+
+    ids = input_ids
+    rng = None
+    if temperature > 0:
+        rng = torch.Generator(device=ids.device)
+        rng.manual_seed(seed)
+
+    for _ in range(max_new_tokens):
+        out = model(input_ids=ids, attention_mask=torch.ones_like(ids), return_dict=True)
+        logits = out.logits[:, -1, :]
+        if top_k is not None and top_k > 0:
+            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+            logits = logits.clone()
+            logits[logits < v[:, [-1]]] = -float("inf")
+        if temperature > 0:
+            logits = logits / temperature
+            probs = F.softmax(logits, dim=-1)
+            next_ids = torch.multinomial(probs, num_samples=1, generator=rng)
+        else:
+            next_ids = torch.argmax(logits, dim=-1, keepdim=True)
+        ids = torch.cat((ids, next_ids), dim=1)
+    return ids
+
+
 def main() -> None:
     args = parse_args()
 
@@ -291,18 +332,29 @@ def main() -> None:
         prompt_len = int(input_ids.shape[-1])
         inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
 
-        do_sample = args.temperature > 0.0
-        gen_kwargs: Dict[str, Any] = {
-            "max_new_tokens": args.max_new_tokens,
-            "do_sample": do_sample,
-            "pad_token_id": tok.eos_token_id,
-        }
-        if do_sample:
-            gen_kwargs["temperature"] = args.temperature
-            gen_kwargs["top_p"] = args.top_p
-
         with torch.no_grad():
-            out = model.generate(**inputs, **gen_kwargs)
+            if args.generation_mode == "compat":
+                out = generate_hf_compat(
+                    model=model,
+                    input_ids=input_ids,
+                    max_new_tokens=args.max_new_tokens,
+                    temperature=args.temperature,
+                    top_k=args.top_k,
+                    seed=args.seed + i,
+                )
+            else:
+                do_sample = args.temperature > 0.0
+                gen_kwargs: Dict[str, Any] = {
+                    "max_new_tokens": args.max_new_tokens,
+                    "do_sample": do_sample,
+                    "pad_token_id": tok.eos_token_id,
+                    "top_k": args.top_k if args.top_k > 0 else None,
+                }
+                if do_sample:
+                    gen_kwargs["temperature"] = args.temperature
+                    gen_kwargs["top_p"] = args.top_p
+                gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
+                out = model.generate(**inputs, **gen_kwargs)
 
         gen_ids = out[0]
         full_text = tok.decode(gen_ids, skip_special_tokens=False)
@@ -342,10 +394,12 @@ def main() -> None:
             "revision": args.revision,
             "device_type": args.device_type,
             "prompt_style": prompt_style,
+            "generation_mode": args.generation_mode,
             "max_new_tokens": args.max_new_tokens,
             "do_sample": args.temperature > 0.0,
             "temperature": args.temperature,
             "top_p": args.top_p,
+            "top_k": args.top_k,
             "expect_min_new_tokens": args.expect_min_new_tokens,
             "expect_min_response_chars": args.expect_min_response_chars,
             "results": results,
