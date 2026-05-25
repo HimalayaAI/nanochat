@@ -185,7 +185,14 @@ def _apply_repetition_penalty(logits, token_ids, penalty: float):
         return logits
     uniq = torch.unique(token_ids)
     penalized = logits.clone()
-    penalized[:, uniq] = penalized[:, uniq] / penalty
+
+    scores = penalized[:, uniq]
+    penalized[:, uniq] = torch.where(
+        scores < 0,
+        scores * penalty,
+        scores / penalty
+    )
+
     return penalized
 
 
