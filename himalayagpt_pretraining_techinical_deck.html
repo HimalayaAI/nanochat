@@ -717,7 +717,7 @@
     <button type="button" id="next" title="Next slide">↓</button>
   </nav>
 
-  <section class="slide" data-slide="01 / 25">
+  <section class="slide" data-slide="01 / 26">
     <div class="eyebrow">Himalaya AI Labs | Technical Talk</div>
     <div class="title-grid">
       <div>
@@ -742,7 +742,7 @@
     </div>
   </section>
 
-  <section class="slide" data-slide="02 / 25">
+  <section class="slide" data-slide="02 / 26">
     <div>
       <div class="eyebrow">PoC Release</div>
       <h2>Meet HimalayaGPT 0.5B: base, instruct, and local inference</h2>
@@ -772,7 +772,7 @@
     </div>
   </section>
 
-  <section class="slide" data-slide="03 / 25">
+  <section class="slide" data-slide="03 / 26">
     <div>
       <div class="eyebrow">Talk Contract</div>
       <h2>What this talk should prove</h2>
@@ -790,7 +790,7 @@
     </div>
   </section>
 
-  <section class="slide" data-slide="04 / 25">
+  <section class="slide" data-slide="04 / 26">
     <div>
       <div class="eyebrow">Published Artifacts</div>
       <h2>Three deliverables, one training lineage</h2>
@@ -815,7 +815,7 @@
     </div>
   </section>
 
-  <section class="slide" data-slide="05 / 25">
+  <section class="slide" data-slide="05 / 26">
     <div>
       <div class="eyebrow">System Overview</div>
       <h2>The training architecture is a pipeline</h2>
@@ -846,7 +846,7 @@ flowchart LR
     </div>
   </section>
 
-  <section class="slide" data-slide="06 / 25">
+  <section class="slide" data-slide="06 / 26">
     <div>
       <div class="eyebrow">Architecture</div>
       <h2>HimalayaGPT 0.5B model shape</h2>
@@ -884,7 +884,7 @@ flowchart LR
     </div>
   </section>
 
-  <section class="slide" data-slide="07 / 25">
+  <section class="slide" data-slide="07 / 26">
     <div>
       <div class="eyebrow">Transformer Internals</div>
       <h2>nanochat is GPT-style, but not plain GPT-2</h2>
@@ -925,7 +925,7 @@ flowchart LR
     </div>
   </section>
 
-  <section class="slide" data-slide="08 / 25">
+  <section class="slide" data-slide="08 / 26">
     <div>
       <div class="eyebrow">PyTorch Module View</div>
       <h2>The architecture maps cleanly to familiar `nn.Module` blocks</h2>
@@ -981,7 +981,7 @@ flowchart LR
     </div>
   </section>
 
-  <section class="slide" data-slide="09 / 25">
+  <section class="slide" data-slide="09 / 26">
     <div>
       <div class="eyebrow">PyTorch Forward Pass</div>
       <h2>The core training step is still the PyTorch loop everyone recognizes</h2>
@@ -1019,7 +1019,7 @@ for step in range(num_iterations):
     </div>
   </section>
 
-  <section class="slide" data-slide="10 / 25">
+  <section class="slide" data-slide="10 / 26">
     <div>
       <div class="eyebrow">PyTorch Runtime Stack</div>
       <h2>Performance comes from stacking small PyTorch decisions</h2>
@@ -1054,7 +1054,7 @@ for step in range(num_iterations):
     </div>
   </section>
 
-  <section class="slide" data-slide="11 / 25">
+  <section class="slide" data-slide="11 / 26">
     <div>
       <div class="eyebrow">Tokenizer</div>
       <h2>Tokenizer quality is a language capability decision</h2>
@@ -1081,7 +1081,7 @@ for step in range(num_iterations):
     </div>
   </section>
 
-  <section class="slide" data-slide="12 / 25">
+  <section class="slide" data-slide="12 / 26">
     <div>
       <div class="eyebrow">Pretraining Data</div>
       <h2>Curated multilingual corpus with Nepali as the center of gravity</h2>
@@ -1119,7 +1119,7 @@ flowchart TB
     </div>
   </section>
 
-  <section class="slide" data-slide="13 / 25">
+  <section class="slide" data-slide="13 / 26">
     <div>
       <div class="eyebrow">Corpus Filtering</div>
       <h2>Quality rules were explicit and repeatable</h2>
@@ -1153,7 +1153,7 @@ flowchart TB
     </div>
   </section>
 
-  <section class="slide" data-slide="14 / 25">
+  <section class="slide" data-slide="14 / 26">
     <div>
       <div class="eyebrow">Pretraining Objective</div>
       <h2>Base model: predict the next token, not chat yet</h2>
@@ -1190,7 +1190,7 @@ flowchart TB
     </div>
   </section>
 
-  <section class="slide" data-slide="15 / 25">
+  <section class="slide" data-slide="15 / 26">
     <div>
       <div class="eyebrow">Scaling Rules</div>
       <h2>nanochat derives training horizon from model scale</h2>
@@ -1223,7 +1223,7 @@ num_iterations =
     </div>
   </section>
 
-  <section class="slide" data-slide="16 / 25">
+  <section class="slide" data-slide="16 / 26">
     <div>
       <div class="eyebrow">SFT Data</div>
       <h2>Instruction tuning used a full conversation mixture</h2>
@@ -1257,7 +1257,7 @@ flowchart LR
     </div>
   </section>
 
-  <section class="slide" data-slide="17 / 25">
+  <section class="slide" data-slide="17 / 26">
     <div>
       <div class="eyebrow">Devanagari Compile</div>
       <h2>A separate Devanagari SFT compile kept the mix reusable</h2>
@@ -1291,7 +1291,7 @@ flowchart LR
     </div>
   </section>
 
-  <section class="slide" data-slide="18 / 25">
+  <section class="slide" data-slide="18 / 26">
     <div>
       <div class="eyebrow">SFT Training</div>
       <h2>Instruction tuning was a one-epoch full pass over the packed mix</h2>
@@ -1319,7 +1319,7 @@ flowchart LR
     </div>
   </section>
 
-  <section class="slide" data-slide="19 / 25">
+  <section class="slide" data-slide="19 / 26">
     <div>
       <div class="eyebrow">Weights & Biases Evidence</div>
       <h2>The training run shows stable throughput and visible learning dynamics</h2>
@@ -1345,7 +1345,7 @@ flowchart LR
     </div>
   </section>
 
-  <section class="slide" data-slide="20 / 25">
+  <section class="slide" data-slide="20 / 26">
     <div>
       <div class="eyebrow">Evaluation</div>
       <h2>We used both benchmark scripts and smoke tests</h2>
@@ -1375,7 +1375,7 @@ Write a Python function to compute Fibonacci numbers.</code></pre>
     </div>
   </section>
 
-  <section class="slide" data-slide="21 / 25">
+  <section class="slide" data-slide="21 / 26">
     <div>
       <div class="eyebrow">HF Export</div>
       <h2>Export parity was a serious engineering stage</h2>
@@ -1412,7 +1412,7 @@ flowchart TB
     </div>
   </section>
 
-  <section class="slide" data-slide="22 / 25">
+  <section class="slide" data-slide="22 / 26">
     <div>
       <div class="eyebrow">GGUF</div>
       <h2>Local inference exposed backend-specific details</h2>
@@ -1444,7 +1444,40 @@ flowchart TB
     </div>
   </section>
 
-  <section class="slide" data-slide="23 / 25">
+  <section class="slide" data-slide="23 / 26">
+    <div>
+      <div class="eyebrow">GGUF Runtime Caveat</div>
+      <h2>GGUF is portable, but nanochat currently needs our llama.cpp fork</h2>
+    </div>
+    <div class="body cols">
+      <div class="panel">
+        <h3>What users must know</h3>
+        <div class="small-list">
+          <div>These GGUF files do not run on upstream `ggml-org/llama.cpp` yet because nanochat is not supported there.</div>
+          <div>Use the fork: `github.com/HimalayaAI/llama.cpp`.</div>
+          <div>LM Studio, Ollama, Open WebUI, and other tools that bundle vanilla llama.cpp will not work until upstream nanochat support lands.</div>
+          <div>The GGUF embeds the nanochat chat template and EOT token, so `--jinja --single-turn` matters for prompt rendering.</div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Quantization notes</h3>
+        <table>
+          <tbody>
+            <tr><td>BF16</td><td>Recommended reference GGUF, numerically closest to HF Transformers.</td></tr>
+            <tr><td>Q8_0</td><td>Practical default: about 533MB and near-identical quality for demos.</td></tr>
+            <tr><td>Q4_K_M</td><td>Smallest file, but math quality degrades more noticeably.</td></tr>
+            <tr><td>F16</td><td>Avoid: squared-ReLU MLP can overflow F16 and produce NaN logits.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="footer">
+      <span>Key message: this is a custom architecture release, not a generic llama.cpp drop-in yet</span>
+      <span>Runtime docs prevent support pain</span>
+    </div>
+  </section>
+
+  <section class="slide" data-slide="24 / 26">
     <div>
       <div class="eyebrow">Debugging Story</div>
       <h2>The failure modes were useful signals</h2>
@@ -1465,7 +1498,7 @@ flowchart TB
     </div>
   </section>
 
-  <section class="slide" data-slide="24 / 25">
+  <section class="slide" data-slide="25 / 26">
     <div>
       <div class="eyebrow">Limitations</div>
       <h2>What this model is, and what it is not</h2>
@@ -1496,7 +1529,7 @@ flowchart TB
     </div>
   </section>
 
-  <section class="slide" data-slide="25 / 25">
+  <section class="slide" data-slide="26 / 26">
     <div>
       <div class="eyebrow">Roadmap</div>
       <h2>From proof of capability to durable Nepali AI infrastructure</h2>
