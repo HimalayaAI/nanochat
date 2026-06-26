@@ -162,6 +162,29 @@ def choose_input_device(model) -> Any:
     return next(model.parameters()).device
 
 
+def materialize_meta_buffers(model, device: str = "cpu") -> int:
+    """Replace meta-device buffers with real empty buffers before model.to(...).
+
+    HF custom-code models can leave non-persistent buffers on the meta device
+    during from_pretrained(). Nanochat refreshes rotary cos/sin buffers lazily
+    during forward, so allocating placeholder real buffers is safe and avoids
+    PyTorch's "Cannot copy out of meta tensor" error when moving the model.
+    """
+    import torch
+
+    fixed = 0
+    for module in model.modules():
+        for name, buffer in list(module._buffers.items()):
+            if buffer is not None and getattr(buffer, "is_meta", False):
+                module._buffers[name] = torch.empty(
+                    tuple(buffer.shape),
+                    dtype=buffer.dtype,
+                    device=device,
+                )
+                fixed += 1
+    return fixed
+
+
 def infer_hf_context_window(model, tokenizer) -> int:
     candidates: List[int] = []
     cfg = getattr(model, "config", None)
@@ -333,6 +356,9 @@ def main() -> None:
         **load_kwargs,
     )
     if use_cuda and not use_device_map:
+        fixed_buffers = materialize_meta_buffers(model, device="cpu")
+        if fixed_buffers:
+            print(f"Materialized {fixed_buffers} meta buffer(s) before moving model to CUDA.")
         model.to("cuda")
     model.eval()
 

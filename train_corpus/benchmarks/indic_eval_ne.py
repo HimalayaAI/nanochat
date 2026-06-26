@@ -200,6 +200,28 @@ def choose_device(args: argparse.Namespace):
     return torch.device(args.device_type)
 
 
+def materialize_meta_buffers(model, device: str = "cpu") -> int:
+    """Replace meta-device buffers with real empty buffers before model.to(...).
+
+    Some HF custom-code loads leave non-persistent rotary buffers on the meta
+    device. Nanochat refreshes those buffers lazily during forward, so empty
+    placeholders are enough to make the subsequent device move safe.
+    """
+    import torch
+
+    fixed = 0
+    for module in model.modules():
+        for name, buffer in list(module._buffers.items()):
+            if buffer is not None and getattr(buffer, "is_meta", False):
+                module._buffers[name] = torch.empty(
+                    tuple(buffer.shape),
+                    dtype=buffer.dtype,
+                    device=device,
+                )
+                fixed += 1
+    return fixed
+
+
 def infer_hf_context_window(args: argparse.Namespace, model, tokenizer) -> int:
     if args.context_window and args.context_window > 0:
         return int(args.context_window)
@@ -405,6 +427,9 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
     print(f"HF load kwargs: {model_kwargs}")
     model = AutoModelForCausalLM.from_pretrained(args.hf_model, **model_kwargs)
     if device.type != "cuda" or args.hf_no_device_map:
+        fixed_buffers = materialize_meta_buffers(model, device="cpu")
+        if fixed_buffers:
+            print(f"Materialized {fixed_buffers} meta buffer(s) before moving model to {device}.")
         model.to(device)
     model.eval()
 
