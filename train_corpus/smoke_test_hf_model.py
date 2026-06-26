@@ -54,6 +54,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--device-type", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument(
+        "--hf-no-device-map",
+        action="store_true",
+        help=(
+            "Do not pass device_map='auto' for CUDA loads; load normally on CPU first, "
+            "then move the model to CUDA. Useful on Colab/consumer GPUs when Accelerate "
+            "meta-tensor dispatch misbehaves."
+        ),
+    )
+    parser.add_argument(
         "--dtype",
         choices=["auto", "float32", "bfloat16"],
         default="auto",
@@ -115,7 +124,7 @@ def load_prompts(path: str | None) -> List[str]:
     raise ValueError(f"Unsupported prompts file extension for {p}; use .txt, .json, or .jsonl")
 
 
-def model_load_kwargs(device_type: str, dtype: str) -> Dict[str, Any]:
+def model_load_kwargs(device_type: str, dtype: str, use_device_map: bool) -> Dict[str, Any]:
     import torch
 
     use_cuda = torch.cuda.is_available() if device_type == "auto" else device_type == "cuda"
@@ -128,10 +137,24 @@ def model_load_kwargs(device_type: str, dtype: str) -> Dict[str, Any]:
             torch_dtype = torch.float32
         else:
             torch_dtype = "auto"
-        return {"torch_dtype": torch_dtype, "device_map": "auto"}
+        kwargs: Dict[str, Any] = {"torch_dtype": torch_dtype}
+        if use_device_map:
+            kwargs["device_map"] = "auto"
+        else:
+            kwargs["low_cpu_mem_usage"] = False
+        return kwargs
     if dtype == "bfloat16":
         raise ValueError("--dtype bfloat16 is only supported with CUDA devices")
     return {"torch_dtype": torch.float32}
+
+
+def should_use_cuda(device_type: str) -> bool:
+    import torch
+
+    use_cuda = torch.cuda.is_available() if device_type == "auto" else device_type == "cuda"
+    if use_cuda and not torch.cuda.is_available():
+        raise RuntimeError("CUDA requested but not available")
+    return bool(use_cuda)
 
 
 def choose_input_device(model) -> Any:
@@ -288,7 +311,9 @@ def main() -> None:
     if not prompts:
         raise ValueError("No prompts to run")
 
-    load_kwargs = model_load_kwargs(args.device_type, args.dtype)
+    use_cuda = should_use_cuda(args.device_type)
+    use_device_map = use_cuda and not args.hf_no_device_map
+    load_kwargs = model_load_kwargs(args.device_type, args.dtype, use_device_map=use_device_map)
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
@@ -307,6 +332,8 @@ def main() -> None:
         revision=args.revision,
         **load_kwargs,
     )
+    if use_cuda and not use_device_map:
+        model.to("cuda")
     model.eval()
 
     model_cfg = getattr(model, "config", None)

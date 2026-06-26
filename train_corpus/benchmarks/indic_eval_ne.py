@@ -65,6 +65,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hf-revision", default="main", help="HF revision")
     parser.add_argument("--trust-remote-code", action="store_true", help="Pass trust_remote_code=True for HF loads")
     parser.add_argument(
+        "--hf-no-device-map",
+        action="store_true",
+        help=(
+            "Do not pass device_map='auto' for HF CUDA loads; load normally on CPU first, "
+            "then move the model to the selected device. Useful on Colab/consumer GPUs "
+            "when Accelerate meta-tensor dispatch misbehaves."
+        ),
+    )
+    parser.add_argument(
         "--hf-dtype",
         choices=["auto", "float32", "bfloat16"],
         default="auto",
@@ -379,7 +388,10 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
             model_kwargs["torch_dtype"] = torch.float32
         else:
             model_kwargs["torch_dtype"] = "auto"
-        model_kwargs["device_map"] = "auto"
+        if args.hf_no_device_map:
+            model_kwargs["low_cpu_mem_usage"] = False
+        else:
+            model_kwargs["device_map"] = "auto"
     else:
         if args.hf_dtype == "bfloat16":
             raise ValueError("--hf-dtype bfloat16 is only supported on CUDA devices")
@@ -392,7 +404,7 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
     )
     print(f"HF load kwargs: {model_kwargs}")
     model = AutoModelForCausalLM.from_pretrained(args.hf_model, **model_kwargs)
-    if device.type != "cuda":
+    if device.type != "cuda" or args.hf_no_device_map:
         model.to(device)
     model.eval()
 
