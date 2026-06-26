@@ -213,13 +213,36 @@ def materialize_meta_buffers(model, device: str = "cpu") -> int:
     for module in model.modules():
         for name, buffer in list(module._buffers.items()):
             if buffer is not None and getattr(buffer, "is_meta", False):
-                module._buffers[name] = torch.empty(
+                module._buffers[name] = torch.zeros(
                     tuple(buffer.shape),
                     dtype=buffer.dtype,
                     device=device,
                 )
                 fixed += 1
     return fixed
+
+
+def refresh_nanochat_rotary_cache(model, device) -> bool:
+    """Force real nanochat rotary cos/sin buffers after device moves."""
+    import torch
+
+    backbone = getattr(model, "model", None)
+    refresh = getattr(backbone, "_refresh_rotary", None)
+    if not callable(refresh):
+        return False
+
+    device_obj = torch.device(device)
+    dtype = torch.float32
+    if device_obj.type == "cuda":
+        idx = device_obj.index
+        if idx is None:
+            idx = torch.cuda.current_device()
+        major, minor = torch.cuda.get_device_capability(idx)
+        if (major, minor) >= (8, 0):
+            dtype = torch.bfloat16
+
+    refresh(device=device_obj, dtype=dtype)
+    return True
 
 
 def infer_hf_context_window(args: argparse.Namespace, model, tokenizer) -> int:
@@ -431,6 +454,8 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
         if fixed_buffers:
             print(f"Materialized {fixed_buffers} meta buffer(s) before moving model to {device}.")
         model.to(device)
+        if refresh_nanochat_rotary_cache(model, device):
+            print(f"Refreshed nanochat rotary cache on {device}.")
     model.eval()
 
     context_window = infer_hf_context_window(args, model, tokenizer)
@@ -501,6 +526,10 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
                 for _ in range(args.max_new_tokens):
                     model_out = model(input_ids=ids, attention_mask=torch.ones_like(ids), return_dict=True)
                     logits = model_out.logits[:, -1, :]
+                    if not torch.isfinite(logits).all():
+                        bad = logits[~torch.isfinite(logits)]
+                        sample = bad[:5].detach().cpu().tolist()
+                        raise RuntimeError(f"Model produced non-finite logits before sampling; sample={sample}")
                     if args.top_k and args.top_k > 0:
                         v, _ = torch.topk(logits, min(args.top_k, logits.size(-1)))
                         logits = logits.clone()

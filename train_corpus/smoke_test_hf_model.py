@@ -176,13 +176,42 @@ def materialize_meta_buffers(model, device: str = "cpu") -> int:
     for module in model.modules():
         for name, buffer in list(module._buffers.items()):
             if buffer is not None and getattr(buffer, "is_meta", False):
-                module._buffers[name] = torch.empty(
+                module._buffers[name] = torch.zeros(
                     tuple(buffer.shape),
                     dtype=buffer.dtype,
                     device=device,
                 )
                 fixed += 1
     return fixed
+
+
+def refresh_nanochat_rotary_cache(model, device: str) -> bool:
+    """Refresh nanochat rotary buffers after moving a HF custom model.
+
+    The exported nanochat backbone lazily rebuilds rotary cos/sin buffers when
+    device or dtype changes. If meta buffers were materialized and then moved to
+    CUDA, the device/dtype check can pass even though the values are placeholders.
+    Force a real refresh here so the first forward pass cannot see zeros/junk.
+    """
+    import torch
+
+    backbone = getattr(model, "model", None)
+    refresh = getattr(backbone, "_refresh_rotary", None)
+    if not callable(refresh):
+        return False
+
+    device_obj = torch.device(device)
+    dtype = torch.float32
+    if device_obj.type == "cuda":
+        idx = device_obj.index
+        if idx is None:
+            idx = torch.cuda.current_device()
+        major, minor = torch.cuda.get_device_capability(idx)
+        if (major, minor) >= (8, 0):
+            dtype = torch.bfloat16
+
+    refresh(device=device_obj, dtype=dtype)
+    return True
 
 
 def infer_hf_context_window(model, tokenizer) -> int:
@@ -305,6 +334,10 @@ def generate_hf_compat(
     for _ in range(max_new_tokens):
         out = model(input_ids=ids, attention_mask=torch.ones_like(ids), return_dict=True)
         logits = out.logits[:, -1, :]
+        if not torch.isfinite(logits).all():
+            bad = logits[~torch.isfinite(logits)]
+            sample = bad[:5].detach().cpu().tolist()
+            raise RuntimeError(f"Model produced non-finite logits before sampling; sample={sample}")
         if top_k is not None and top_k > 0:
             v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
             logits = logits.clone()
@@ -360,6 +393,8 @@ def main() -> None:
         if fixed_buffers:
             print(f"Materialized {fixed_buffers} meta buffer(s) before moving model to CUDA.")
         model.to("cuda")
+        if refresh_nanochat_rotary_cache(model, "cuda"):
+            print("Refreshed nanochat rotary cache on CUDA.")
     model.eval()
 
     model_cfg = getattr(model, "config", None)
