@@ -336,6 +336,17 @@ def build_hf_prompt_ids(tokenizer, prompt: str, prompt_style: str) -> List[int]:
     raise ValueError(f"Unknown prompt style: {prompt_style}")
 
 
+def get_hf_stop_token_ids(tokenizer) -> set[int]:
+    candidates = {
+        tokenizer.eos_token_id,
+        tokenizer.bos_token_id,
+        _hf_special_id(tokenizer, "<|assistant_end|>"),
+        _hf_special_id(tokenizer, "<|user_start|>"),
+        _hf_special_id(tokenizer, "<|user_end|>"),
+    }
+    return {int(tid) for tid in candidates if tid is not None and int(tid) >= 0}
+
+
 def load_eval_rows(args: argparse.Namespace) -> List[Dict[str, Any]]:
     from datasets import load_dataset
 
@@ -468,10 +479,12 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
 
     vocab_size = int(getattr(model.config, "vocab_size", len(tokenizer)))
     truncate_context = not args.no_truncate_context
+    stop_token_ids = get_hf_stop_token_ids(tokenizer)
 
     print(f"Loaded HF model: {args.hf_model}@{args.hf_revision}")
     print(f"Prompt style: {prompt_style}")
     print(f"HF context window: {context_window} | max prompt tokens (after reserve): {max_prompt_tokens}")
+    print(f"Stop token ids: {sorted(stop_token_ids)}")
 
     do_sample = args.temperature > 0.0
     outputs: List[Dict[str, Any]] = []
@@ -512,6 +525,7 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
             "temperature": args.temperature if do_sample else None,
             "top_p": args.top_p if do_sample else None,
             "top_k": args.top_k if do_sample and args.top_k > 0 else None,
+            "eos_token_id": sorted(stop_token_ids),
             "pad_token_id": tokenizer.eos_token_id,
         }
         gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
@@ -541,6 +555,8 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
                     else:
                         next_ids = torch.argmax(logits, dim=-1, keepdim=True)
                     ids = torch.cat((ids, next_ids), dim=1)
+                    if next_ids.size(0) == 1 and int(next_ids.item()) in stop_token_ids:
+                        break
             out = ids
         else:
             with torch.no_grad():

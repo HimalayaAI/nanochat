@@ -314,6 +314,17 @@ def build_prompt_ids(tokenizer, prompt: str, prompt_style: str) -> List[int]:
     raise ValueError(f"Unknown prompt style: {prompt_style}")
 
 
+def get_stop_token_ids(tokenizer) -> set[int]:
+    candidates = {
+        tokenizer.eos_token_id,
+        tokenizer.bos_token_id,
+        _hf_special_id(tokenizer, "<|assistant_end|>"),
+        _hf_special_id(tokenizer, "<|user_start|>"),
+        _hf_special_id(tokenizer, "<|user_end|>"),
+    }
+    return {int(tid) for tid in candidates if tid is not None and int(tid) >= 0}
+
+
 def generate_hf_compat(
     model,
     input_ids,
@@ -321,6 +332,7 @@ def generate_hf_compat(
     temperature: float,
     top_k: int,
     seed: int,
+    stop_token_ids: set[int] | None = None,
 ):
     import torch
     import torch.nn.functional as F
@@ -330,6 +342,7 @@ def generate_hf_compat(
     if temperature > 0:
         rng = torch.Generator(device=ids.device)
         rng.manual_seed(seed)
+    stop_token_ids = stop_token_ids or set()
 
     for _ in range(max_new_tokens):
         out = model(input_ids=ids, attention_mask=torch.ones_like(ids), return_dict=True)
@@ -349,6 +362,8 @@ def generate_hf_compat(
         else:
             next_ids = torch.argmax(logits, dim=-1, keepdim=True)
         ids = torch.cat((ids, next_ids), dim=1)
+        if next_ids.size(0) == 1 and int(next_ids.item()) in stop_token_ids:
+            break
     return ids
 
 
@@ -406,6 +421,7 @@ def main() -> None:
         embedding_vocab_size = len(tok)
 
     prompt_style = maybe_fallback_chat_to_plain(prompt_style, tok, embedding_vocab_size)
+    stop_token_ids = get_stop_token_ids(tok)
     context_window = infer_hf_context_window(model, tok)
     max_prompt_tokens = max(1, context_window - int(args.max_new_tokens))
 
@@ -413,6 +429,7 @@ def main() -> None:
     print(f"Loaded model on device: {device}")
     print(f"Prompt style: {prompt_style}")
     print(f"Context window: {context_window} | max prompt tokens: {max_prompt_tokens}")
+    print(f"Stop token ids: {sorted(stop_token_ids)}")
     print(f"Running {len(prompts)} prompt(s)")
 
     results: List[Dict[str, Any]] = []
@@ -444,12 +461,14 @@ def main() -> None:
                     temperature=args.temperature,
                     top_k=args.top_k,
                     seed=args.seed + i,
+                    stop_token_ids=stop_token_ids,
                 )
             else:
                 do_sample = args.temperature > 0.0
                 gen_kwargs: Dict[str, Any] = {
                     "max_new_tokens": args.max_new_tokens,
                     "do_sample": do_sample,
+                    "eos_token_id": sorted(stop_token_ids),
                     "pad_token_id": tok.eos_token_id,
                     "top_k": args.top_k if args.top_k > 0 else None,
                 }
