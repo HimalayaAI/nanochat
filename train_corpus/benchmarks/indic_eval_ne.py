@@ -126,6 +126,18 @@ def parse_args() -> argparse.Namespace:
         help="Output folder for metrics + predictions",
     )
     parser.add_argument("--run-name", default="", help="Optional run name for output filenames")
+    parser.add_argument(
+        "--preview-every",
+        type=int,
+        default=0,
+        help="Print a readable prompt/target/prediction preview every N examples (0 disables).",
+    )
+    parser.add_argument(
+        "--preview-chars",
+        type=int,
+        default=500,
+        help="Maximum characters per preview field.",
+    )
 
     return parser.parse_args()
 
@@ -172,6 +184,31 @@ def strip_special_markers(text: str) -> str:
     for tok in SPECIAL_TOKENS:
         out = out.replace(tok, "")
     return out.strip()
+
+
+class Term:
+    RESET = "\033[0m"
+    DIM = "\033[2m"
+    BOLD = "\033[1m"
+    CYAN = "\033[36m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    MAGENTA = "\033[35m"
+
+
+def shorten(text: str, max_chars: int) -> str:
+    text = re.sub(r"\s+", " ", text.strip())
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rstrip() + "…"
+
+
+def print_preview(idx: int, total: int, prompt: str, target: str, prediction: str, max_chars: int) -> None:
+    print()
+    print(f"{Term.BOLD}{Term.CYAN}--- Preview {idx + 1}/{total} ---{Term.RESET}")
+    print(f"{Term.BOLD}{Term.YELLOW}Prompt:{Term.RESET} {shorten(prompt, max_chars)}")
+    print(f"{Term.BOLD}{Term.GREEN}Target:{Term.RESET} {shorten(target, max_chars)}")
+    print(f"{Term.BOLD}{Term.MAGENTA}Prediction:{Term.RESET} {shorten(prediction or '<empty>', max_chars)}")
 
 
 def resolve_prompt_style(args: argparse.Namespace) -> str:
@@ -415,6 +452,8 @@ def run_nanochat_eval(args: argparse.Namespace, prompt_style: str, rows: List[Di
                 "prediction": prediction,
             }
         )
+        if args.preview_every > 0 and ((idx + 1) % args.preview_every == 0 or idx == 0):
+            print_preview(idx, len(rows), prompt, target, prediction, args.preview_chars)
         if (idx + 1) % 20 == 0 or (idx + 1) == len(rows):
             print(f"Progress: {idx + 1}/{len(rows)}")
 
@@ -575,6 +614,8 @@ def run_hf_eval(args: argparse.Namespace, prompt_style: str, rows: List[Dict[str
                 "prediction": prediction,
             }
         )
+        if args.preview_every > 0 and ((idx + 1) % args.preview_every == 0 or idx == 0):
+            print_preview(idx, len(rows), prompt, target, prediction, args.preview_chars)
 
         if (idx + 1) % 20 == 0 or (idx + 1) == len(rows):
             print(f"Progress: {idx + 1}/{len(rows)}")
